@@ -322,6 +322,53 @@ mput_features(S, [_Pid, ObjSpecs], _Res) ->
                {mput, [ element(1, ObjSpec) || ObjSpec <- ObjSpecs ]},
                [{mput, unsupported}]).
 
+%% --- Operation: head ---
+head_pre(S) ->
+    is_leveled_open(S).
+
+head_args(#{leveled := Pid, previous_keys := PK, start_opts := Opts}) ->
+    ?LET({Key, Bucket}, gen_key_in_bucket(PK),
+         [Pid, Bucket, Key, default(none, gen_tag(Opts))]).
+
+head_pre(#{leveled := Leveled}, [Pid, _Bucket, _Key, _Tag]) ->
+    Pid == Leveled.
+
+head_adapt(#{leveled := Leveled}, [_, Bucket, Key, Tag]) ->    
+    [Leveled, Bucket, Key, Tag].
+
+head(Pid, Bucket, Key, none) ->
+    leveled_bookie:book_head(Pid, Bucket, Key);
+head(Pid, Bucket, Key, Tag) ->
+    leveled_bookie:book_head(Pid, Bucket, Key, Tag).
+
+head_post(#{model := Model} = S, [_Pid, Bucket, Key, Tag], Res) ->
+    ?CMD_VALID(S, head,
+               case Res of
+                   {ok, _} ->
+                       eq(Res, orddict:find({Bucket, Key}, Model));
+                   not_found ->
+                       %% Weird to be able to supply a tag, but must be STD_TAG...
+                       %% Tag =/= ?STD_HEAD orelse 
+                       orddict:find({Bucket, Key}, Model) == error;
+                   {unsupported_message, head} ->
+                       Tag =/= ?HEAD_TAG
+               end,
+               eq(Res, not_found)).
+               %%eq(Res, {unsupported_message, head})).
+
+head_features(#{deleted_keys := DK, previous_keys := PK}, [_Pid, Bucket, Key, _Tag], Res) ->
+    case Res of
+        not_found ->
+            [{head, not_found, deleted} || lists:member({Key, Bucket}, DK)] ++ 
+          [{head, not_found, not_inserted} || not lists:member({Key, Bucket}, PK)];
+        {ok, {_, _}} ->  %% Key / SubKey???
+            [{head, found}];
+        {unsupported_message, _} ->
+            [{head, unsupported}]
+    end.
+
+
+
 
 %% --- Operation: delete ---
 %% @doc delete_pre/1 - Precondition for generation
@@ -385,7 +432,7 @@ delete_features(#{previous_keys := PK} = S, [_Pid, Bucket, Key], _Res) ->
 -spec is_empty_pre(S :: eqc_statem:symbolic_state()) -> boolean().
 %% is_empty does not work when started in head_only mode! But it should.
 is_empty_pre(S) ->
-    is_leveled_open(S) andalso not in_head_only_mode(S).
+    is_leveled_open(S). %% andalso not in_head_only_mode(S).
 
 %% @doc is_empty_args - Argument generator
 -spec is_empty_args(S :: eqc_statem:symbolic_state()) -> eqc_gen:gen([term()]).
@@ -718,6 +765,8 @@ is_valid_cmd(S, delete) ->
     is_valid_cmd(S, put);
 is_valid_cmd(S, get) ->
     not in_head_only_mode(S);
+is_valid_cmd(S, head) ->
+    in_head_only_mode(S);
 is_valid_cmd(S, mput) ->
     in_head_only_mode(S).
 
@@ -814,6 +863,7 @@ gen_key() ->
     binary(16).
 
 %% Cannot be atoms!
+%% key() type specified: should be binary().
 gen_bucket() -> 
     elements([<<"bucket1">>, <<"bucket2">>, <<"bucket3">>]).
 
