@@ -85,6 +85,13 @@ init_backend_args(#{dir := Dir} = S) ->
             [Opts]
     end.
 
+init_backend_pre(S, [Options]) ->
+    %% for shrinking
+    maps:get(start_opts, S, Options) == Options.
+
+init_backend_adapt(S, [Options]) ->
+    [ maps:get(start_opts, S, Options) ].
+
 %% @doc init_backend - The actual operation
 %% Start the database and read data from disk
 init_backend(Options) ->
@@ -114,7 +121,7 @@ init_backend_post(_S, [_Options], LevelEdPid) ->
     is_pid(LevelEdPid).
 
 init_backend_features(_S, [Options], _Res) ->
-    Options.
+    [{start_options, Options}].
 
 
 %% --- Operation: stop ---
@@ -788,7 +795,11 @@ prop_db() ->
             RunResult = execute(Kind, Cmds, [{dir, Dir}]),
             %% Do not extract the 'state' from this tuple, since parallel commands
             %% miss the notion of final state.
-            CallFeatures = [ Feature || Feature <- call_features(history(RunResult)), not is_foldaccT(Feature)],
+            CallFeatures = [ Feature || Feature <- call_features(history(RunResult)), 
+                                        not is_foldaccT(Feature),
+                                        not (is_tuple(Feature) andalso element(1, Feature) == start_options) 
+                           ],
+            StartOptionFeatures = [ lists:keydelete(root_path, 1, Feature) || {start_options, Feature} <- call_features(history(RunResult)) ],
 
             case whereis(sut) of
                 undefined -> delete_level_data(Dir);
@@ -809,6 +820,7 @@ prop_db() ->
             aggregate(command_names(Cmds),
             collect(Kind,
             aggregate(with_title('Features'), CallFeatures,
+            aggregate(with_title('Start Options'), StartOptionFeatures,
             features(CallFeatures,
                       conjunction([{result, 
                                     ?WHENFAIL([ begin
@@ -819,7 +831,7 @@ prop_db() ->
                                    {data_cleanup, 
                                     ?WHENFAIL(eqc:format("~s\n", [os:cmd("ls -Rl " ++ Dir)]),
                                               empty_dir(Dir))},
-                                   {pid_cleanup, equals(Wait, [])}])))))))
+                                   {pid_cleanup, equals(Wait, [])}]))))))))
 
         end)
     end).
