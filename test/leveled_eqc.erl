@@ -344,24 +344,23 @@ head(Pid, Bucket, Key, Tag) ->
 head_post(#{model := Model} = S, [_Pid, Bucket, Key, Tag], Res) ->
     ?CMD_VALID(S, head,
                case Res of
-                   {ok, _} ->
-                       eq(Res, orddict:find({Bucket, Key}, Model));
+                   {ok, _MetaData} ->
+                       orddict:find({Bucket, Key}, Model) =/= error;
                    not_found ->
                        %% Weird to be able to supply a tag, but must be STD_TAG...
-                       %% Tag =/= ?STD_HEAD orelse 
+                       implies(lists:member(maps:get(start_opts, S), [{head_only, with_lookup}]), lists:member(Tag, [?STD_TAG, none, ?HEAD_TAG])) orelse 
                        orddict:find({Bucket, Key}, Model) == error;
                    {unsupported_message, head} ->
                        Tag =/= ?HEAD_TAG
                end,
-               eq(Res, not_found)).
-               %%eq(Res, {unsupported_message, head})).
+               eq(Res, {unsupported_message, head})).
 
 head_features(#{deleted_keys := DK, previous_keys := PK}, [_Pid, Bucket, Key, _Tag], Res) ->
     case Res of
         not_found ->
             [{head, not_found, deleted} || lists:member({Key, Bucket}, DK)] ++ 
           [{head, not_found, not_inserted} || not lists:member({Key, Bucket}, PK)];
-        {ok, {_, _}} ->  %% Key / SubKey???
+        {ok, {_, _}} ->  %% Metadata
             [{head, found}];
         {unsupported_message, _} ->
             [{head, unsupported}]
@@ -766,7 +765,7 @@ is_valid_cmd(S, delete) ->
 is_valid_cmd(S, get) ->
     not in_head_only_mode(S);
 is_valid_cmd(S, head) ->
-    in_head_only_mode(S);
+    not lists:member({head_only, no_lookup}, maps:get(start_opts, S, []));
 is_valid_cmd(S, mput) ->
     in_head_only_mode(S).
 
