@@ -783,11 +783,13 @@ is_valid_cmd(S, mput) ->
 -spec prop_db() -> eqc:property().
 prop_db() ->
     Dir = "./leveled_data",
+    ?LET(Shrinking, parameter(shrinking, false),
     ?FORALL({Kind, Cmds}, more_commands(20, oneof([{seq, commands(?MODULE)}, 
                                                    {par, parallel_commands(?MODULE)}])),
     begin
         delete_level_data(Dir),
         ?IMPLIES(empty_dir(Dir),
+        ?ALWAYS(if Shrinking -> 10; true -> 1 end,
         begin
             Procs = erlang:processes(),
             StartTime = erlang:system_time(millisecond),
@@ -833,8 +835,8 @@ prop_db() ->
                                               empty_dir(Dir))},
                                    {pid_cleanup, equals(Wait, [])}]))))))))
 
-        end)
-    end).
+        end))
+    end)).
 
 history({H, _, _}) -> H.
 result({_, _, Res}) -> Res.
