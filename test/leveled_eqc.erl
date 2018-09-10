@@ -865,12 +865,20 @@ show_function(F) ->
     end.
 
 
+%% slack discussion:
+%% `max_journalsize` should be at least 2048 + byte_size(smallest_object) + byte_size(smallest_object's key) + overhead (which is a few bytes per K/V pair).
 gen_opts() ->
-    ?LET([HeadOnly, CompMethod, CompPoint], vector(3, bool()),
-         [{head_only, elements([false, no_lookup, with_lookup])} || HeadOnly] ++
-             [{compression_method, elements([native, lz4])} || CompMethod] ++
-             [{compression_point, elements([on_compact, on_receipt])} || CompPoint]
-        ).
+    options([{head_only, elements([false, no_lookup, with_lookup])},
+             {compression_method, elements([native, lz4])},
+             {compression_point, elements([on_compact, on_receipt])},
+             {max_journalsize, ?LET(N, nat(), 2048 + 1000 + 32 + 16 + 16 + N)},
+             {cache_size, elements([4, 1000, 1024, 2048, 5000])} %% 3 crashes the system!
+            ]).
+
+options(GenList) ->
+    ?LET(Bools, vector(length(GenList), bool()),
+         [ Opt || {Opt, true} <- lists:zip(GenList, Bools)]).
+
 
 gen_key() ->
     binary(16).
