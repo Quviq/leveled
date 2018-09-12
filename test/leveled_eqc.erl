@@ -452,9 +452,8 @@ delete_features(#{previous_keys := PK} = S, [_Pid, Bucket, Key], _Res) ->
 %% --- Operation: is_empty ---
 %% @doc is_empty_pre/1 - Precondition for generation
 -spec is_empty_pre(S :: eqc_statem:symbolic_state()) -> boolean().
-%% is_empty does not work when started in head_only mode! But it should.
 is_empty_pre(S) ->
-    is_leveled_open(S). %% andalso not in_head_only_mode(S).
+    is_leveled_open(S).
 
 %% @doc is_empty_args - Argument generator
 -spec is_empty_args(S :: eqc_statem:symbolic_state()) -> eqc_gen:gen([term()]).
@@ -628,7 +627,7 @@ indexfold_features(_S, [_Pid, _Constraint, FoldFun, _Range, _TermHandling, _Coun
 %% slack discussion: "`book_keylist` only passes `Bucket` and `Key` into the accumulator, ignoring SubKey - 
 %% so I don't think this can be used in head_only mode to return results that make sense"
 keylistfold1_pre(S) ->
-    is_leveled_open(S) andalso not in_head_only_mode(S).
+    is_leveled_open(S).
 
 keylistfold1_args(#{leveled := Pid, counter := Counter, tag := Tag}) ->
     [Pid, Tag, gen_foldacc(),
@@ -888,11 +887,11 @@ show_function(F) ->
 %% slack discussion:
 %% `max_journalsize` should be at least 2048 + byte_size(smallest_object) + byte_size(smallest_object's key) + overhead (which is a few bytes per K/V pair).
 gen_opts() ->
-    options([{head_only, elements([false, no_lookup, with_lookup])},
-             {compression_method, elements([native, lz4])},
-             {compression_point, elements([on_compact, on_receipt])},
-             {max_journalsize, ?LET(N, nat(), 2048 + 1000 + 32 + 16 + 16 + N)},
-             {cache_size, elements([4, 1000, 1024, 2048, 5000])} %% 3 crashes the system!
+    options([%% {head_only, elements([false, no_lookup, with_lookup])} we don't test head_only mode
+              {compression_method, elements([native, lz4])}
+            , {compression_point, elements([on_compact, on_receipt])}
+            %% , {max_journalsize, ?LET(N, nat(), 2048 + 1000 + 32 + 16 + 16 + N)}
+            , {cache_size, elements([4, 1000, 1024, 2048, 5000])} %% 3 crashes the system!
             ]).
 
 options(GenList) ->
