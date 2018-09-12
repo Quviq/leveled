@@ -189,19 +189,27 @@ put_pre(S) ->
 
 %% @doc put_args - Argument generator
 -spec put_args(S :: eqc_statem:symbolic_state()) -> eqc_gen:gen([term()]).
-put_args(#{leveled := Pid, previous_keys := PK}) ->
-    ?LET({Key, Bucket}, gen_key_in_bucket(PK),
-         [Pid, Bucket, Key, gen_val()]).
+put_args(#{leveled := Pid, previous_keys := PK, tag := Tag}) ->
+    ?LET({{Key, Bucket}, Value, IndexSpec, MetaData}, 
+         {gen_key_in_bucket(PK), gen_val(), [], []},
+         case Tag of
+             ?STD_TAG -> [Pid, Bucket, Key, Value, IndexSpec, elements([none, Tag])]; 
+             ?RIAK_TAG ->
+                 Obj = testutil:riak_object(Bucket, Key, Value, MetaData),
+                 [Pid, Bucket, Key, Obj, IndexSpec, Tag]  
+         end).
 
-put_pre(#{leveled := Leveled}, [Pid, _Bucket, _Key, _Value]) ->
+put_pre(#{leveled := Leveled}, [Pid, _Bucket, _Key, _Value, _, _]) ->
     Pid == Leveled.
 
-put_adapt(#{leveled := Leveled}, [_, Bucket, Key, Value]) ->
-    [ Leveled, Bucket, Key, Value ].
+put_adapt(#{leveled := Leveled}, [_, Bucket, Key, Value, Spec, Tag]) ->
+    [ Leveled, Bucket, Key, Value, Spec, Tag ].
 
 %% @doc put - The actual operation
-put(Pid, Bucket, Key, Value) ->
-    leveled_bookie:book_put(Pid, Bucket, Key, Value, []).
+put(Pid, Bucket, Key, Value, Spec, none) ->
+    leveled_bookie:book_put(Pid, Bucket, Key, Value, Spec);
+put(Pid, Bucket, Key, Value, Spec, Tag) ->
+    leveled_bookie:book_put(Pid, Bucket, Key, Value, Spec, Tag).
 
 %% @doc put_next - Next state function
 -spec put_next(S, Var, Args) -> NewS
@@ -209,13 +217,13 @@ put(Pid, Bucket, Key, Value) ->
          Var  :: eqc_statem:var() | term(),
          Args :: [term()],
          NewS :: eqc_statem:symbolic_state() | eqc_state:dynamic_state().
-put_next(#{model := Model, previous_keys := PK} = S, _Value, [_Pid, Bucket, Key, Value]) ->
+put_next(#{model := Model, previous_keys := PK} = S, _Value, [_Pid, Bucket, Key, Value, _Spec, _Tag]) ->
     ?CMD_VALID(S, put,
                S#{model => orddict:store({Bucket, Key}, Value, Model),
                   previous_keys => PK ++ [{Key, Bucket}]},
                S).
 
-put_post(S, [_, _, _, _], Res) ->
+put_post(S, [_, _, _, _, _, _], Res) ->
     ?CMD_VALID(S, put, eq(Res, ok), eq(Res, {unsupported_message, put})).
 
 %% @doc put_features - Collects a list of features of this call with these arguments.
@@ -223,14 +231,14 @@ put_post(S, [_, _, _, _], Res) ->
     when S    :: eqc_statem:dynmic_state(),
          Args :: [term()],
          Res  :: term().
-put_features(#{previous_keys := PK} = S, [_Pid, Bucket, Key, _Value], _Res) ->
+put_features(#{previous_keys := PK} = S, [_Pid, Bucket, Key, _Value, _, Tag], _Res) ->
     ?CMD_VALID(S, put,
                case 
                    lists:member({Key, Bucket}, PK) of
                    true ->
-                       [{put, update}];
+                       [{put, update, Tag}];
                    false ->
-                       [{put, insert}]
+                       [{put, insert, Tag}]
                end,
                [{put, unsupported}]).
 
