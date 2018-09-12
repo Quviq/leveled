@@ -400,19 +400,21 @@ delete_pre(S) ->
 
 %% @doc delete_args - Argument generator
 -spec delete_args(S :: eqc_statem:symbolic_state()) -> eqc_gen:gen([term()]).
-delete_args(#{leveled := Pid, previous_keys := PK}) ->
+delete_args(#{leveled := Pid, previous_keys := PK, tag := Tag}) ->
     ?LET({Key, Bucket}, gen_key_in_bucket(PK),
-         [Pid, Bucket, Key]).
+         [Pid, Bucket, Key, [], Tag]).
 
-delete_pre(#{leveled := Leveled}, [Pid, _, _Key]) ->
+delete_pre(#{leveled := Leveled}, [Pid, _, _Key, _Spec, _Tag]) ->
     Pid == Leveled.
 
-delete_adapt(#{leveled := Leveled}, [_, Bucket, Key]) ->
-    [ Leveled, Bucket, Key ].
+delete_adapt(#{leveled := Leveled}, [_, Bucket, Key, Spec, Tag]) ->
+    [ Leveled, Bucket, Key, Spec, Tag ].
 
 %% @doc delete - The actual operation
-delete(Pid, Bucket, Key) ->
-    leveled_bookie:book_delete(Pid, Bucket, Key, []).
+delete(Pid, Bucket, Key, Spec, ?STD_TAG) ->
+    leveled_bookie:book_delete(Pid, Bucket, Key, Spec);
+delete(Pid, Bucket, Key, Spec, Tag) ->
+    leveled_bookie:book_put(Pid, Bucket, Key, delete, Spec, Tag).
 
 %% @doc delete_next - Next state function
 -spec delete_next(S, Var, Args) -> NewS
@@ -420,13 +422,13 @@ delete(Pid, Bucket, Key) ->
          Var  :: eqc_statem:var() | term(),
          Args :: [term()],
          NewS :: eqc_statem:symbolic_state() | eqc_state:dynamic_state().
-delete_next(#{model := Model, deleted_keys := DK} = S, _Value, [_Pid, Bucket, Key]) ->
+delete_next(#{model := Model, deleted_keys := DK} = S, _Value, [_Pid, Bucket, Key, _, _]) ->
     ?CMD_VALID(S, delete,
                S#{model => orddict:erase({Bucket, Key}, Model), 
                   deleted_keys => DK ++ [{Key, Bucket} || orddict:is_key({Key, Bucket}, Model)]},
                S).
 
-delete_post(S, [_Pid, _Bucket, _Key], Res) ->
+delete_post(S, [_Pid, _Bucket, _Key, _, _], Res) ->
     ?CMD_VALID(S, delete,
                eq(Res, ok),
                case Res of
@@ -439,7 +441,7 @@ delete_post(S, [_Pid, _Bucket, _Key], Res) ->
     when S    :: eqc_statem:dynmic_state(),
          Args :: [term()],
          Res  :: term().
-delete_features(#{previous_keys := PK} = S, [_Pid, Bucket, Key], _Res) ->
+delete_features(#{previous_keys := PK} = S, [_Pid, Bucket, Key, _, _], _Res) ->
     ?CMD_VALID(S, delete,
                case lists:member({Key, Bucket}, PK) of
                    true ->
