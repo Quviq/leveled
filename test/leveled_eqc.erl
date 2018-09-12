@@ -98,16 +98,12 @@ init_backend_adapt(S, [Tag, Options]) ->
 %% @doc init_backend - The actual operation
 %% Start the database and read data from disk
 init_backend(_Tag, Options) ->
-    Self = self(),
-    %% Start in a spawned process such that tester is not linked to SUT
-    spawn(fun() -> Self ! {init_backend, leveled_bookie:book_start(Options)} end), 
-    receive
-        {init_backend, {ok, Bookie}} ->
+    case leveled_bookie:book_start(Options) of
+        {ok, Bookie} ->
+            unlink(Bookie),
             erlang:register(sut, Bookie),
             Bookie;
         Error -> Error
-    after 1000 ->
-            {error, timeout}
     end.
 
 %% @doc init_backend_next - Next state function
@@ -574,9 +570,6 @@ kill(Pid) ->
 
 kill_next(S, Value, [Pid]) ->
     stop_next(S, Value, [Pid]).
-
-    
-
 
 %% Testing fold:
 %% Note async and sync mode!
