@@ -83,7 +83,7 @@ init_backend_args(#{dir := Dir} = S) ->
               [{root_path, Dir} | gen_opts()] ];
         Opts ->
             %% root_path is part of existing options
-            [ default(?RIAK_TAG, ?STD_TAG), Opts]
+            [ maps:get(tag, S), Opts]
     end.
 
 init_backend_pre(S, [Tag, Options]) ->
