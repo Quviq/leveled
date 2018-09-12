@@ -385,6 +385,8 @@ head_features(#{deleted_keys := DK, previous_keys := PK}, [_Pid, Bucket, Key, _T
           [{head, not_found, not_inserted} || not lists:member({Key, Bucket}, PK)];
         {ok, {_, _}} ->  %% Metadata
             [{head, found}];
+        {ok, Bin} when is_binary(Bin) ->
+            [{head, found_riak_object}];
         {unsupported_message, _} ->
             [{head, unsupported}]
     end.
