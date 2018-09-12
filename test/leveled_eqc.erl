@@ -524,7 +524,7 @@ drop(Pid, Tag, Opts) ->
         {'DOWN', Mon, _Type, Pid, _Info} ->
             init_backend(Tag, Opts)
     after 5000 ->
-            {still_a_pid, Pid}
+            {still_alive, Pid}
     end.
 
 %% @doc drop_next - Next state function
@@ -832,7 +832,7 @@ prop_db() ->
                     leveled_bookie:book_destroy(Pid)
             end,
 
-            Wait = wait_for_procs(Procs, 500),
+            Wait = wait_for_procs(Procs, 1500),
             RunTime = erlang:system_time(millisecond) - StartTime,
 
             %% Since in parallel commands we don't have access to the state, we retrieve functions
