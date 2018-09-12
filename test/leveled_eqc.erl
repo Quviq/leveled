@@ -156,7 +156,8 @@ stop(Pid) ->
 stop_next(S, _Value, [_Pid]) ->
     S#{leveled => undefined,
        folders => [],
-       stop_folders => maps:get(folders, S, [])}.  
+       used_folders => [],
+       stop_folders => maps:get(folders, S, []) ++ maps:get(used_folders, S, [])}.  
 
 %% @doc stop_post - Postcondition for stop
 -spec stop_post(S, Args, Res) -> true | term()
@@ -596,8 +597,9 @@ indexfold_next(#{folders := Folders, model := _Model} = S, SymFolder,
            Folders ++ 
            [#{counter => Counter, 
               folder => SymFolder, 
-              foldfun => FoldFun, 
-              result => []         %% fold over the snapshot
+              foldfun => FoldFun,
+              reusable => true
+              %% fold over new snapshot each time
              }],
        counter =>  Counter + 1}.
 
@@ -642,7 +644,8 @@ keylistfold1_next(#{folders := Folders, model := Model, start_opts := Opts} = S,
            Folders ++ 
            [#{counter => Counter, 
               folder => SymFolder, 
-              foldfun => FoldAccT, 
+              foldfun => FoldAccT,
+              reusable => false,
               result => case Model == orddict:new() orelse not valid_tag(Tag, Opts)  of
                             true -> Acc;
                             false -> 
@@ -677,19 +680,30 @@ fold_run(_, Folder) ->
 fold_run_next(#{folders := Folders} = S, _Value, [Counter, _Folder]) ->
     %% leveled_runner comment: "Iterators should de-register themselves from the Penciller on completion."
     FoldObj = get_foldobj(Folders, Counter),
-    UsedFolders = maps:get(used_folders, S, []),
-    S#{folders => Folders -- [FoldObj],
-       used_folders => UsedFolders ++ [maps:with([counter, folder], FoldObj)]}.
+    case FoldObj of
+        #{reusable := false} ->
+            UsedFolders = maps:get(used_folders, S, []),
+            S#{folders => Folders -- [FoldObj],
+               used_folders => UsedFolders ++ [FoldObj]};
+        _ -> 
+            S
+    end.
     
-fold_run_post(#{folders := Folders, leveled := Leveled}, [Count, _], Res) ->
-    #{result := Result} = get_foldobj(Folders, Count),
+fold_run_post(#{folders := Folders, leveled := Leveled, model := Model}, [Count, _], Res) ->
+    FoldObj = get_foldobj(Folders, Count),
     case Leveled of 
         undefined ->
             is_exit(Res);
         _ ->
-            eq(Res, Result)
+            case FoldObj of
+                #{reusable := false, result := Result} ->
+                    eq(Res, Result);
+                #{foldfun := fold_collect} ->
+                    {Fun, Acc} = fold_collect(),
+                    MRes = orddict:fold(fun({B, K}, _V, A) -> Fun(B, K, A) end, Acc, Model),
+                    eq(Res, MRes)
+            end
     end.
-
                
 %% --- Operation: fold_run on already used folder ---
 %% A fold that has already ran to completion should results in an exception when re-used.
@@ -711,16 +725,10 @@ noreuse_fold(_, Folder) ->
     catch Folder().
 
 noreuse_fold_post(_S, [_, _], Res) ->
-    Res == [] orelse  %% This seems weird!
-        is_exit(Res).
+    is_exit(Res).
 
-noreuse_fold_features(#{leveled := Leveled}, [_, _], _) ->
-    [ case Leveled of
-          undefined -> 
-              reuse_fold_when_closed;
-          _ ->
-              reuse_fold_when_open
-      end ].
+noreuse_fold_features(_, [_, _], _) ->
+    [ reuse_fold ].
 
 
 %% --- Operation: fold_run on folder that survived a crash ---
