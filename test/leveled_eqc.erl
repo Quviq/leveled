@@ -79,28 +79,35 @@ init_backend_pre(S) ->
 init_backend_args(#{dir := Dir} = S) ->
     case maps:get(start_opts, S, undefined) of
         undefined ->
-            [[{root_path, Dir} | gen_opts()]];
+            [ default(?RIAK_TAG, ?STD_TAG),  %% Just test one tag at a time
+              [{root_path, Dir} | gen_opts()] ];
         Opts ->
             %% root_path is part of existing options
-            [Opts]
+            [ default(?RIAK_TAG, ?STD_TAG), Opts]
     end.
 
-init_backend_pre(S, [Options]) ->
+init_backend_pre(S, [Tag, Options]) ->
     %% for shrinking
+    maps:get(tag, S, Tag) == Tag andalso 
     maps:get(start_opts, S, Options) == Options.
 
-init_backend_adapt(S, [Options]) ->
-    [ maps:get(start_opts, S, Options) ].
+init_backend_adapt(S, [Tag, Options]) ->
+    [ maps:get(tag, S, Tag), maps:get(start_opts, S, Options) ].
+
 
 %% @doc init_backend - The actual operation
 %% Start the database and read data from disk
-init_backend(Options) ->
-    case leveled_bookie:book_start(Options) of
-        {ok, Bookie} when is_pid(Bookie) ->
-            unlink(Bookie),
+init_backend(_Tag, Options) ->
+    Self = self(),
+    %% Start in a spawned process such that tester is not linked to SUT
+    spawn(fun() -> Self ! {init_backend, leveled_bookie:book_start(Options)} end), 
+    receive
+        {init_backend, {ok, Bookie}} ->
             erlang:register(sut, Bookie),
             Bookie;
         Error -> Error
+    after 1000 ->
+            {error, timeout}
     end.
 
 %% @doc init_backend_next - Next state function
@@ -109,18 +116,18 @@ init_backend(Options) ->
          Var  :: eqc_statem:var() | term(),
          Args :: [term()],
          NewS :: eqc_statem:symbolic_state() | eqc_state:dynamic_state().
-init_backend_next(S, LevelEdPid, [Options]) ->
-    S#{leveled => LevelEdPid, start_opts => Options}.
+init_backend_next(S, LevelEdPid, [Tag, Options]) ->
+    S#{leveled => LevelEdPid, start_opts => Options, tag => Tag}.
 
 %% @doc init_backend_post - Postcondition for init_backend
 -spec init_backend_post(S, Args, Res) -> true | term()
     when S    :: eqc_state:dynamic_state(),
          Args :: [term()],
          Res  :: term().
-init_backend_post(_S, [_Options], LevelEdPid) ->
+init_backend_post(_S, [_, _Options], LevelEdPid) ->
     is_pid(LevelEdPid).
 
-init_backend_features(_S, [Options], _Res) ->
+init_backend_features(_S, [_Tag, Options], _Res) ->
     [{start_options, Options}].
 
 
@@ -235,9 +242,9 @@ get_pre(S) ->
 
 %% @doc get_args - Argument generator
 -spec get_args(S :: eqc_statem:symbolic_state()) -> eqc_gen:gen([term()]).
-get_args(#{leveled := Pid, previous_keys := PK, start_opts := Opts}) ->
+get_args(#{leveled := Pid, previous_keys := PK, tag := Tag}) ->
     ?LET({Key, Bucket}, gen_key_in_bucket(PK),
-         [Pid, Bucket, Key, default(none, gen_tag(Opts))]).
+         [Pid, Bucket, Key, case Tag of ?STD_TAG -> default(none, Tag); _ -> Tag end]).
 
 %% @doc get - The actual operation
 get(Pid, Bucket, Key, none) ->
@@ -334,9 +341,9 @@ mput_features(S, [_Pid, ObjSpecs], _Res) ->
 head_pre(S) ->
     is_leveled_open(S).
 
-head_args(#{leveled := Pid, previous_keys := PK, start_opts := Opts}) ->
+head_args(#{leveled := Pid, previous_keys := PK, tag := Tag}) ->
     ?LET({Key, Bucket}, gen_key_in_bucket(PK),
-         [Pid, Bucket, Key, default(none, gen_tag(Opts))]).
+         [Pid, Bucket, Key, Tag]).
 
 head_pre(#{leveled := Leveled}, [Pid, _Bucket, _Key, _Tag]) ->
     Pid == Leveled.
@@ -443,8 +450,8 @@ is_empty_pre(S) ->
 
 %% @doc is_empty_args - Argument generator
 -spec is_empty_args(S :: eqc_statem:symbolic_state()) -> eqc_gen:gen([term()]).
-is_empty_args(#{leveled := Pid, start_opts := Opts}) ->
-    [Pid, gen_tag(Opts)].
+is_empty_args(#{leveled := Pid, tag := Tag}) ->
+    [Pid, Tag].
 
 
 is_empty_pre(#{leveled := Leveled}, [Pid, _]) ->
@@ -462,16 +469,12 @@ is_empty(Pid, Tag) ->
     when S    :: eqc_state:dynamic_state(),
          Args :: [term()],
          Res  :: term().
-is_empty_post(#{model := Model, start_opts := Opts}, [_Pid, Tag], Res) ->
-    case valid_tag(Tag, Opts) of
-        false -> true;   %% this is a bit weird
-        true ->
-            Size = orddict:size(Model),
-            case Res of
-                true -> eq(0, Size);
-                false when Size == 0 -> expected_empty;
-                false when Size > 0  -> true
-            end
+is_empty_post(#{model := Model}, [_Pid, _Tag], Res) ->
+    Size = orddict:size(Model),
+    case Res of
+        true -> eq(0, Size);
+        false when Size == 0 -> expected_empty;
+        false when Size > 0  -> true
     end.
 
 %% @doc is_empty_features - Collects a list of features of this call with these arguments.
@@ -491,23 +494,24 @@ drop_pre(S) ->
 %% @doc drop_args - Argument generator
 %% Generate start options used when restarting
 -spec drop_args(S :: eqc_statem:symbolic_state()) -> eqc_gen:gen([term()]).
-drop_args(#{leveled := Pid, dir := Dir}) ->
-    [Pid, [{root_path, Dir} | gen_opts()]].
+drop_args(#{leveled := Pid} = S) ->
+    ?LET([Tag, _], init_backend_args(S),
+         [Pid, Tag, gen_opts()]).
 
-drop_pre(#{leveled := Leveled}, [Pid, _Opts]) ->
+drop_pre(#{leveled := Leveled}, [Pid, _Tag, _Opts]) ->
     Pid == Leveled.
 
-drop_adapt(#{leveled := Leveled}, [_Pid, Opts]) ->
-    [Leveled, Opts].
+drop_adapt(#{leveled := Leveled}, [_Pid, Tag, Opts]) ->
+    [Leveled, Tag, Opts].
     
 %% @doc drop - The actual operation
 %% Remove fles from disk (directory structure may remain) and start a new clean database
-drop(Pid, Opts) ->
+drop(Pid, Tag, Opts) ->
     Mon = erlang:monitor(process, Pid),
     ok = leveled_bookie:book_destroy(Pid),
     receive
         {'DOWN', Mon, _Type, Pid, _Info} ->
-            init_backend(Opts)
+            init_backend(Tag, Opts)
     after 5000 ->
             {still_a_pid, Pid}
     end.
@@ -518,23 +522,23 @@ drop(Pid, Opts) ->
          Var  :: eqc_statem:var() | term(),
          Args :: [term()],
          NewS :: eqc_statem:symbolic_state() | eqc_state:dynamic_state().
-drop_next(S, Value, [Pid, Opts]) ->
+drop_next(S, Value, [Pid, Tag, Opts]) ->
     S1 = stop_next(S, Value, [Pid]),
     init_backend_next(S1#{model => orddict:new()}, 
-                      Value, [Opts]).
+                      Value, [Tag, Opts]).
 
 %% @doc drop_post - Postcondition for drop
 -spec drop_post(S, Args, Res) -> true | term()
     when S    :: eqc_state:dynamic_state(),
          Args :: [term()],
          Res  :: term().
-drop_post(_S, [_Pid, _Opts], NewPid) ->
+drop_post(_S, [_Pid, _Tag, _Opts], NewPid) ->
     case is_pid(NewPid) of
         true  -> true;
         false -> NewPid
     end.
 
-drop_features(#{model := Model}, [_Pid, _Opts], _Res) ->
+drop_features(#{model := Model}, [_Pid, _Tag, _Opts], _Res) ->
     Size = orddict:size(Model),
     [{drop, empty} || Size == 0 ] ++ [{drop, Size div 10} || Size > 0 ].
 
@@ -618,8 +622,8 @@ indexfold_features(_S, [_Pid, _Constraint, FoldFun, _Range, _TermHandling, _Coun
 keylistfold1_pre(S) ->
     is_leveled_open(S) andalso not in_head_only_mode(S).
 
-keylistfold1_args(#{leveled := Pid, counter := Counter, start_opts := Opts}) ->
-    [Pid, gen_tag(Opts), gen_foldacc(),
+keylistfold1_args(#{leveled := Pid, counter := Counter, tag := Tag}) ->
+    [Pid, Tag, gen_foldacc(),
      Counter  %% add a unique counter
     ].
 
@@ -637,8 +641,8 @@ keylistfold1(Pid, Tag, FoldAccT, _Counter) ->
     {async, Folder} = leveled_bookie:book_keylist(Pid, Tag, FoldAccT),
     Folder.
 
-keylistfold1_next(#{folders := Folders, model := Model, start_opts := Opts} = S, SymFolder, 
-               [_, Tag, FoldAccT, Counter]) ->
+keylistfold1_next(#{folders := Folders, model := Model} = S, SymFolder, 
+               [_, _Tag, FoldAccT, Counter]) ->
     {Fun, Acc} = FoldAccT, 
     S#{folders => 
            Folders ++ 
@@ -646,7 +650,7 @@ keylistfold1_next(#{folders := Folders, model := Model, start_opts := Opts} = S,
               folder => SymFolder, 
               foldfun => FoldAccT,
               reusable => false,
-              result => case Model == orddict:new() orelse not valid_tag(Tag, Opts)  of
+              result => case Model == orddict:new()  of
                             true -> Acc;
                             false -> 
                                 orddict:fold(fun({B, K}, _V, A) -> Fun(B, K, A) end, Acc, Model)
@@ -906,16 +910,6 @@ gen_key_in_bucket(Previous) ->
          frequency([{1, gen_key_in_bucket([])},
                     {1, {K, gen_bucket()}},
                     {2, {K, B}}])).
-
-gen_tag(_StartOptions) ->
-  oneof([?STD_TAG, ?IDX_TAG, ?HEAD_TAG]).
-
-valid_tag(?STD_TAG, StartOptions) ->
-    proplists:get_value(head_only, StartOptions, false) == false;
-valid_tag(?HEAD_TAG, StartOptions) ->
-    proplists:get_value(head_only, StartOptions, false) =/= false;
-valid_tag(?IDX_TAG, _StartOptions) ->
-    false.
 
 gen_foldacc() ->
     ?SHRINK(oneof([{eqc_fun:function3(int()), int()},
