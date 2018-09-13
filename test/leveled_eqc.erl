@@ -581,31 +581,30 @@ indexfold_pre(S) ->
 
 indexfold_args(#{leveled := Pid, counter := Counter, previous_keys := PK}) ->
     ?LET({Key, Bucket}, gen_key_in_bucket(PK),
-         [Pid, oneof([Bucket, {Bucket, Key}]), fold_collect, {range, 1, 10}, {bool(), undefined},
+         [Pid, oneof([Bucket, {Bucket, Key}]), gen_foldacc(), {range, 1, 10}, {bool(), undefined},
           Counter  %% add a unique counter
          ]).
 
-indexfold_pre(#{leveled := Leveled}, [Pid, _Constraint, _FoldFun, _Range, _TermHandling, _Counter]) ->
+indexfold_pre(#{leveled := Leveled}, [Pid, _Constraint, _FoldAccT, _Range, _TermHandling, _Counter]) ->
     %% Make sure we operate on an existing Pid when shrinking
     %% Check start options validity as well?
     Pid == Leveled.
     
-indexfold_adapt(#{leveled := Leveled}, [_, Constraint, FoldFun, Range, TermHandling, Counter]) ->
+indexfold_adapt(#{leveled := Leveled}, [_, Constraint, FoldAccT, Range, TermHandling, Counter]) ->
     %% Keep the counter!
-    [Leveled, Constraint, FoldFun, Range, TermHandling, Counter].
+    [Leveled, Constraint, FoldAccT, Range, TermHandling, Counter].
 
-indexfold(Pid, Constraint, FoldFun, Range, TermHandling, _Counter) ->
-    FoldAccT = ?MODULE:FoldFun(),
+indexfold(Pid, Constraint, FoldAccT, Range, TermHandling, _Counter) ->
     {async, Folder} = leveled_bookie:book_indexfold(Pid, Constraint, FoldAccT, Range, TermHandling),
     Folder.
 
 indexfold_next(#{folders := Folders, model := _Model} = S, SymFolder, 
-               [_, _Constraint, FoldFun, _Range, _TermHandling, Counter]) ->
+               [_, _Constraint, FoldAccT, _Range, _TermHandling, Counter]) ->
     S#{folders => 
            Folders ++ 
            [#{counter => Counter, 
               folder => SymFolder, 
-              foldfun => FoldFun,
+              foldfun => FoldAccT,
               reusable => true
               %% fold over new snapshot each time
              }],
@@ -631,14 +630,14 @@ keylistfold1_args(#{leveled := Pid, counter := Counter, tag := Tag}) ->
      Counter  %% add a unique counter
     ].
 
-keylistfold1_pre(#{leveled := Leveled}, [Pid, _Tag, _FoldFun, _Counter]) ->
+keylistfold1_pre(#{leveled := Leveled}, [Pid, _Tag, _FoldAccT, _Counter]) ->
     %% Make sure we operate on an existing Pid when shrinking
     %% Check start options validity as well?
     Pid == Leveled.
     
-keylistfold1_adapt(#{leveled := Leveled}, [_, Tag, FoldFun, Counter]) ->
+keylistfold1_adapt(#{leveled := Leveled}, [_, Tag, FoldAccT, Counter]) ->
     %% Keep the counter!
-    [Leveled, Tag, FoldFun, Counter].
+    [Leveled, Tag, FoldAccT, Counter].
 
 keylistfold1(Pid, Tag, FoldAccT, _Counter) ->
     %% FoldAccT = ?MODULE:FoldFun(),
@@ -702,8 +701,8 @@ fold_run_post(#{folders := Folders, leveled := Leveled, model := Model}, [Count,
             case FoldObj of
                 #{reusable := false, result := Result} ->
                     eq(Res, Result);
-                #{foldfun := fold_collect} ->
-                    {Fun, Acc} = fold_collect(),
+                #{foldfun := FoldAccT} ->
+                    {Fun, Acc} = FoldAccT,
                     MRes = orddict:fold(fun({B, K}, _V, A) -> Fun(B, K, A) end, Acc, Model),
                     eq(Res, MRes)
             end
