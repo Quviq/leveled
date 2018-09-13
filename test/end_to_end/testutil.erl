@@ -49,6 +49,7 @@
             foldkeysfun/3,
             foldkeysfun_returnbucket/3,
             sync_strategy/0,
+            riak_object/4,
         numbered_key/1,
         fixed_bin_key/1]).
 
@@ -64,6 +65,14 @@
 
 %% =================================================
 %% From riak_object
+
+riak_object(Bucket, Key, Value, MetaData) ->
+    Content = #r_content{metadata=dict:from_list(MetaData), value=Value},
+    Obj = #r_object{bucket=Bucket,
+                    key=Key,
+                    contents=[Content],
+                    vclock=generate_vclock()},
+    to_binary(v1, Obj).
 
 to_binary(v1, #r_object{contents=Contents, vclock=VClock}) ->
     new_v1(VClock, Contents).
