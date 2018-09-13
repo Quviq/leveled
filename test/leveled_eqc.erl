@@ -79,7 +79,7 @@ init_backend_pre(S) ->
 init_backend_args(#{dir := Dir} = S) ->
     case maps:get(start_opts, S, undefined) of
         undefined ->
-            [ default(?RIAK_TAG, ?STD_TAG),  %% Just test one tag at a time
+            [ ?RIAK_TAG, %%% default(?RIAK_TAG, ?STD_TAG),  %% Just test one tag at a time
               [{root_path, Dir} | gen_opts()] ];
         Opts ->
             %% root_path is part of existing options
@@ -308,7 +308,7 @@ mput_pre(S) ->
 %%
 %% Really weird to have to specify a value in case of a remove action
 mput_args(#{leveled := Pid, previous_keys := PK}) ->
-    ?LET(Objs, list({gen_key_in_bucket(PK), nat()}),
+    ?LET(Objs, noshrink(list({gen_key_in_bucket(PK), nat()})),
          [Pid, [ {weighted_default({5, add}, {1, remove}), Bucket, Key, SubKey, gen_val()} || {{Key, Bucket}, SubKey} <- Objs ]]).
 
 
@@ -577,7 +577,7 @@ kill_next(S, Value, [Pid]) ->
 
 %% --- Operation: index folding ---
 indexfold_pre(S) ->
-    is_leveled_open(S).
+    false andalso is_leveled_open(S).
 
 indexfold_args(#{leveled := Pid, counter := Counter, previous_keys := PK}) ->
     ?LET({Key, Bucket}, gen_key_in_bucket(PK),
@@ -788,20 +788,19 @@ is_valid_cmd(S, head) ->
 is_valid_cmd(S, mput) ->
     in_head_only_mode(S).
 
-
-
 %% @doc check that the implementation of leveled is equivalent to a
 %% sorted dict at least
 -spec prop_db() -> eqc:property().
 prop_db() ->
     Dir = "./leveled_data",
     ?LET(Shrinking, parameter(shrinking, false),
-    ?FORALL({Kind, Cmds}, more_commands(20, oneof([{seq, commands(?MODULE)}, 
-                                                   {par, parallel_commands(?MODULE)}])),
+    ?FORALL({Kind, Cmds}, more_commands(2, {seq, commands(?MODULE)}), 
+    %% ?FORALL({Kind, Cmds}, more_commands(2, oneof([{seq, commands(?MODULE)}, 
+    %%                                                {par, parallel_commands(?MODULE)}])),
     begin
         delete_level_data(Dir),
         ?IMPLIES(empty_dir(Dir),
-        ?ALWAYS(if Shrinking -> 10; true -> 1 end,
+        ?ALWAYS(if Shrinking -> 2; true -> 1 end,
         begin
             Procs = erlang:processes(),
             StartTime = erlang:system_time(millisecond),
@@ -883,7 +882,7 @@ gen_opts() ->
     options([%% {head_only, elements([false, no_lookup, with_lookup])} we don't test head_only mode
               {compression_method, elements([native, lz4])}
             , {compression_point, elements([on_compact, on_receipt])}
-            %% , {max_journalsize, ?LET(N, nat(), 2048 + 1000 + 32 + 16 + 16 + N)}
+            , {max_journalsize, ?LET(N, nat(), 2048 + 1000 + 32 + 16 + 16 + N)}
             , {cache_size, elements([4, 1000, 1024, 2048, 5000])} %% 3 crashes the system!
             ]).
 
@@ -912,8 +911,8 @@ gen_key_in_bucket(Previous) ->
                     {2, {K, B}}])).
 
 gen_foldacc() ->
-    ?SHRINK(oneof([{eqc_fun:function3(int()), int()},
-                   {eqc_fun:function3(list(int())), list(int())}]),
+    ?SHRINK(noshrink(oneof([{eqc_fun:function3(int()), int()},
+                            {eqc_fun:function3(list(int())), list(int())}])),
             [fold_collect()]).
 
 
