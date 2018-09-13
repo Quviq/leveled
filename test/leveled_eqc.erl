@@ -581,7 +581,7 @@ indexfold_pre(S) ->
 
 indexfold_args(#{leveled := Pid, counter := Counter, previous_keys := PK}) ->
     ?LET({Key, Bucket}, gen_key_in_bucket(PK),
-         [Pid, oneof([Bucket, {Bucket, Key}]), gen_foldacc(), {range, 1, 10}, {bool(), undefined},
+         [Pid, oneof([Bucket, {Bucket, Key}]), gen_foldacc(2), {range, 1, 10}, {bool(), undefined},
           Counter  %% add a unique counter
          ]).
 
@@ -598,14 +598,15 @@ indexfold(Pid, Constraint, FoldAccT, Range, TermHandling, _Counter) ->
     {async, Folder} = leveled_bookie:book_indexfold(Pid, Constraint, FoldAccT, Range, TermHandling),
     Folder.
 
-indexfold_next(#{folders := Folders, model := _Model} = S, SymFolder, 
-               [_, _Constraint, FoldAccT, _Range, _TermHandling, Counter]) ->
+indexfold_next(#{folders := Folders} = S, SymFolder, 
+               [_, _Constraint, {Fun, Acc}, _Range, _TermHandling, Counter]) ->
     S#{folders => 
            Folders ++ 
-           [#{counter => Counter, 
-              folder => SymFolder, 
-              foldfun => FoldAccT,
-              reusable => true
+           [#{counter => Counter,
+              type => indexfold,
+              folder => SymFolder,
+              reusable => true,
+              result => fun(Model) -> orddict:fold(fun({B, K}, _V, A) -> Fun(B, K, A) end, Acc, Model) end
               %% fold over new snapshot each time
              }],
        counter =>  Counter + 1}.
@@ -613,8 +614,8 @@ indexfold_next(#{folders := Folders, model := _Model} = S, SymFolder,
 indexfold_post(_S, _, Res) ->
     is_function(Res).
 
-indexfold_features(_S, [_Pid, _Constraint, FoldFun, _Range, _TermHandling, _Counter], _Res) ->
-    [{foldAccT, FoldFun}]. %% This will be extracted for printing later
+indexfold_features(_S, [_Pid, _Constraint, FoldAccT, _Range, _TermHandling, _Counter], _Res) ->
+    [{foldAccT, FoldAccT}]. %% This will be extracted for printing later
 
 
 
@@ -626,7 +627,7 @@ keylistfold1_pre(S) ->
     is_leveled_open(S).
 
 keylistfold1_args(#{leveled := Pid, counter := Counter, tag := Tag}) ->
-    [Pid, Tag, gen_foldacc(),
+    [Pid, Tag, gen_foldacc(2),
      Counter  %% add a unique counter
     ].
 
@@ -640,18 +641,16 @@ keylistfold1_adapt(#{leveled := Leveled}, [_, Tag, FoldAccT, Counter]) ->
     [Leveled, Tag, FoldAccT, Counter].
 
 keylistfold1(Pid, Tag, FoldAccT, _Counter) ->
-    %% FoldAccT = ?MODULE:FoldFun(),
     {async, Folder} = leveled_bookie:book_keylist(Pid, Tag, FoldAccT),
     Folder.
 
 keylistfold1_next(#{folders := Folders, model := Model} = S, SymFolder, 
-               [_, _Tag, FoldAccT, Counter]) ->
-    {Fun, Acc} = FoldAccT, 
+               [_, _Tag, {Fun, Acc}, Counter]) ->
     S#{folders => 
            Folders ++ 
-           [#{counter => Counter, 
-              folder => SymFolder, 
-              foldfun => FoldAccT,
+           [#{counter => Counter,
+              type => keylist,
+              folder => SymFolder,
               reusable => false,
               result => orddict:fold(fun({B, K}, _V, A) -> Fun(B, K, A) end, Acc, Model)           
              }],
@@ -662,6 +661,48 @@ keylistfold1_post(_S, _, Res) ->
 
 keylistfold1_features(_S, [_Pid, _Tag, FoldAccT, _Counter], _Res) ->
     [{foldAccT, FoldAccT}]. %% This will be extracted for printing later
+%% --- Operation: bucketlistfold ---
+bucketlistfold_pre(S) ->
+   is_leveled_open(S).
+
+bucketlistfold_args(#{leveled := Pid, counter := Counter, tag := Tag}) ->
+    [Pid, Tag, gen_foldacc(1), elements([first, all]), Counter].
+
+bucketlistfold_pre(#{leveled := Leveled}, [Pid, _Tag, _FoldAccT, _Constraints, _]) ->
+     Pid == Leveled.
+
+bucketlistfold_adapt(#{leveled := Leveled}, [_Pid, Tag, FoldAccT, Constraints, Counter]) ->
+    [Leveled, Tag, FoldAccT, Constraints, Counter].
+
+bucketlistfold(Pid, Tag, FoldAccT, Constraints, _) ->
+    {async, Folder} = leveled_bookie:book_bucketlist(Pid, Tag, FoldAccT, Constraints),
+    Folder.
+
+bucketlistfold_next(#{folders := Folders} = S, SymFolder, 
+                    [_, _, {Fun, Acc}, Constraints, Counter]) ->
+    S#{folders => 
+           Folders ++ 
+           [#{counter => Counter,
+              type => bucketlist,
+              folder => SymFolder, 
+              reusable => true,
+              result => fun(Model) -> 
+                                Buckets = orddict:fold(fun({B, _K}, _V, A) -> Fun(B, A) end, Acc, Model),
+                                case Constraints of
+                                    all -> Buckets;
+                                    first -> [lists:last(Buckets)]
+                                end
+                        end        
+             }],
+       counter => Counter + 1}.
+
+bucketlistfold_post(_S, [_Pid, _Tag, _FoldAccT, _Constraints, _], Res) ->
+    is_function(Res).
+
+bucketlistfold_features(_S, [_Pid, _Tag, FoldAccT, _Constraints, _], _Res) ->
+    [ {foldAccT, FoldAccT} ].
+
+
 
 
 %% --- Operation: fold_run ---
@@ -701,9 +742,8 @@ fold_run_post(#{folders := Folders, leveled := Leveled, model := Model}, [Count,
             case FoldObj of
                 #{reusable := false, result := Result} ->
                     eq(Res, Result);
-                #{foldfun := FoldAccT} ->
-                    {Fun, Acc} = FoldAccT,
-                    MRes = orddict:fold(fun({B, K}, _V, A) -> Fun(B, K, A) end, Acc, Model),
+                #{result := ResFun} ->
+                    MRes = ResFun(Model),
                     eq(Res, MRes)
             end
     end.
@@ -910,14 +950,19 @@ gen_key_in_bucket(Previous) ->
                     {1, {K, gen_bucket()}},
                     {2, {K, B}}])).
 
-gen_foldacc() ->
-    ?SHRINK(oneof([{eqc_fun:function3(int()), int()},
-                   {eqc_fun:function3(list(int())), list(int())}]),
-            [fold_collect()]).
+gen_foldacc(2) ->
+    ?SHRINK(noshrink(oneof([{eqc_fun:function3(int()), int()},
+                            {eqc_fun:function3(list(int())), list(int())}])),
+            [fold_collect()]);
+gen_foldacc(1) ->
+    ?SHRINK(noshrink(oneof([{eqc_fun:function2(int()), int()},
+                            {eqc_fun:function2(list(int())), list(int())}])),
+            [fold_buckets()]).
+
 
 
 fold_buckets() ->
-    {fun(B, _K, Acc) -> [B | Acc] end, []}.
+    {fun(B, Acc) -> [B | Acc] end, []}.
              
 fold_collect() ->
     {fun(X, Y, Z) -> [{X, Y} | Z] end, []}.
