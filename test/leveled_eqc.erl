@@ -654,11 +654,7 @@ keylistfold1_next(#{folders := Folders, model := Model} = S, SymFolder,
               folder => SymFolder, 
               foldfun => FoldAccT,
               reusable => false,
-              result => case Model == orddict:new()  of
-                            true -> Acc;
-                            false -> 
-                                orddict:fold(fun({B, K}, _V, A) -> Fun(B, K, A) end, Acc, Model)
-                        end
+              result => orddict:fold(fun({B, K}, _V, A) -> Fun(B, K, A) end, Acc, Model)           
              }],
        counter => Counter + 1}.
 
