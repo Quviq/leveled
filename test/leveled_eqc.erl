@@ -501,9 +501,9 @@ drop_pre(S) ->
 %% @doc drop_args - Argument generator
 %% Generate start options used when restarting
 -spec drop_args(S :: eqc_statem:symbolic_state()) -> eqc_gen:gen([term()]).
-drop_args(#{leveled := Pid} = S) ->
+drop_args(#{leveled := Pid, dir := Dir} = S) ->
     ?LET([Tag, _], init_backend_args(S),
-         [Pid, Tag, gen_opts()]).
+         [Pid, Tag, [{root_path, Dir} | gen_opts()]]).
 
 drop_pre(#{leveled := Leveled}, [Pid, _Tag, _Opts]) ->
     Pid == Leveled.
