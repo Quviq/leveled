@@ -686,11 +686,15 @@ bucketlistfold_next(#{folders := Folders} = S, SymFolder,
               type => bucketlist,
               folder => SymFolder, 
               reusable => true,
-              result => fun(Model) -> 
-                                Buckets = orddict:fold(fun({B, _K}, _V, A) -> Fun(B, A) end, Acc, Model),
-                                case Constraints of
-                                    all -> Buckets;
-                                    first -> [lists:last(Buckets)]
+              result => fun(Model) ->
+                                Bs = orddict:fold(fun({B, _K}, _V, A) -> A ++ [B || not lists:member(B, A)] end, [], Model),
+                                case {Constraints, Bs} of
+                                    {all, _} ->
+                                        lists:foldr(fun(B, A) -> Fun(B, A) end, Acc, Bs);
+                                    {first, []} ->
+                                        Acc;
+                                    {first, [First|_]} ->
+                                        lists:foldl(fun(B, A) -> Fun(B, A) end, Acc, [First])
                                 end
                         end        
              }],
@@ -701,8 +705,6 @@ bucketlistfold_post(_S, [_Pid, _Tag, _FoldAccT, _Constraints, _], Res) ->
 
 bucketlistfold_features(_S, [_Pid, _Tag, FoldAccT, _Constraints, _], _Res) ->
     [ {foldAccT, FoldAccT} ].
-
-
 
 
 %% --- Operation: fold_run ---
@@ -951,12 +953,12 @@ gen_key_in_bucket(Previous) ->
                     {2, {K, B}}])).
 
 gen_foldacc(2) ->
-    ?SHRINK(noshrink(oneof([{eqc_fun:function3(int()), int()},
-                            {eqc_fun:function3(list(int())), list(int())}])),
+    ?SHRINK(oneof([{eqc_fun:function3(int()), int()},
+                   {eqc_fun:function3(list(int())), list(int())}]),
             [fold_collect()]);
 gen_foldacc(1) ->
-    ?SHRINK(noshrink(oneof([{eqc_fun:function2(int()), int()},
-                            {eqc_fun:function2(list(int())), list(int())}])),
+    ?SHRINK(oneof([{eqc_fun:function2(int()), int()},
+                   {eqc_fun:function2(list(int())), list(int())}]),
             [fold_buckets()]).
 
 
