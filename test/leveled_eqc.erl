@@ -925,7 +925,7 @@ gen_opts() ->
               {compression_method, elements([native, lz4])}
             , {compression_point, elements([on_compact, on_receipt])}
             %% , {max_journalsize, ?LET(N, nat(), 2048 + 1000 + 32 + 16 + 16 + N)}
-            , {cache_size, elements([4, 1000, 1024, 2048, 5000])} %% 3 crashes the system!
+            , {cache_size, oneof([nat(), 2048, 2060, 5000])}
             ]).
 
 options(GenList) ->
