@@ -636,7 +636,6 @@ indexfold_next(#{folders := Folders} = S, SymFolder,
               folder => SymFolder,
               reusable => true,
               result => fun(Model) ->
-                                
                                 Select = 
                                     orddict:fold(fun({B, K}, {_V, Spec}, A) ->
                                                          [ {B, {Idx, K}} || {Cat, Idx} <- Spec,
@@ -648,7 +647,6 @@ indexfold_next(#{folders := Folders} = S, SymFolder,
                                                     Fun(B, NK, A)
                                             end, Acc, Select)
                         end 
-              %% fold over new snapshot each time
              }],
        counter =>  Counter + 1}.
 
@@ -787,7 +785,16 @@ fold_run_post(#{folders := Folders, leveled := Leveled, model := Model}, [Count,
                     eq(Res, Result);
                 #{result := ResFun} ->
                     MRes = ResFun(Model),
-                    eq(Res, MRes)
+                    case {is_list(Res), is_list(MRes)} of
+                        {true, true} ->
+                            %% order not important
+                            case {Res--MRes, MRes--Res} of
+                                {[], []} -> true;
+                                {Extra, MExtra} -> {Extra, disjunct, MExtra}
+                            end;
+                        _ ->
+                            eq(Res, MRes)
+                    end
             end
     end.
                
