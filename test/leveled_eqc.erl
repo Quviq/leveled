@@ -186,14 +186,15 @@ put_pre(S) ->
 %% @doc put_args - Argument generator
 -spec put_args(S :: eqc_statem:symbolic_state()) -> eqc_gen:gen([term()]).
 put_args(#{leveled := Pid, previous_keys := PK, tag := Tag}) ->
+    ?LET(Categories, gen_categories(),
     ?LET({{Key, Bucket}, Value, IndexSpec, MetaData}, 
-         {gen_key_in_bucket(PK), gen_val(), [], []},
+         {gen_key_in_bucket(PK), gen_val(), [{add, Cat, choose(1,5)} || Cat <- Categories ], []},
          case Tag of
              ?STD_TAG -> [Pid, Bucket, Key, Value, IndexSpec, elements([none, Tag])]; 
              ?RIAK_TAG ->
                  Obj = testutil:riak_object(Bucket, Key, Value, MetaData),
                  [Pid, Bucket, Key, Obj, IndexSpec, Tag]  
-         end).
+         end)).
 
 put_pre(#{leveled := Leveled}, [Pid, _Bucket, _Key, _Value, _, _]) ->
     Pid == Leveled.
@@ -213,10 +214,18 @@ put(Pid, Bucket, Key, Value, Spec, Tag) ->
          Var  :: eqc_statem:var() | term(),
          Args :: [term()],
          NewS :: eqc_statem:symbolic_state() | eqc_state:dynamic_state().
-put_next(#{model := Model, previous_keys := PK} = S, _Value, [_Pid, Bucket, Key, Value, _Spec, _Tag]) ->
+put_next(#{model := Model, previous_keys := PK} = S, _Value, [_Pid, Bucket, Key, Value, Spec, _Tag]) ->
     ?CMD_VALID(S, put,
-               S#{model => orddict:store({Bucket, Key}, Value, Model),
-                  previous_keys => PK ++ [{Key, Bucket}]},
+               begin
+                   NewSpec = 
+                       case orddict:find({Bucket, Key}, Model) of
+                           error -> merge_index_spec([], Spec);
+                           {ok, {_, OldSpec}} ->
+                               merge_index_spec(OldSpec, Spec)
+                       end,
+                   S#{model => orddict:store({Bucket, Key}, {Value, NewSpec}, Model),
+                      previous_keys => PK ++ [{Key, Bucket}]}
+               end,
                S).
 
 put_post(S, [_, _, _, _, _, _], Res) ->
@@ -237,6 +246,14 @@ put_features(#{previous_keys := PK} = S, [_Pid, Bucket, Key, _Value, _, Tag], _R
                        [{put, insert, Tag}]
                end,
                [{put, unsupported}]).
+
+merge_index_spec(Spec, []) ->
+    Spec;
+merge_index_spec(Spec, [{add, Cat, Idx} | Rest]) -> 
+    merge_index_spec(lists:delete({Cat, Idx}, Spec) ++ [{Cat, Idx}], Rest);
+merge_index_spec(Spec, [{remove, Cat, Idx} | Rest]) -> 
+    merge_index_spec(lists:delete({Cat, Idx}, Spec), Rest).
+
 
 %% --- Operation: get ---
 %% @doc get_pre/1 - Precondition for generation
@@ -271,7 +288,8 @@ get_post(#{model := Model} = S, [_Pid, Bucket, Key, Tag], Res) ->
     ?CMD_VALID(S, get,
                case Res of
                    {ok, _} ->
-                       eq(Res, orddict:find({Bucket, Key}, Model));
+                       {ok, {Value, _}} = orddict:find({Bucket, Key}, Model),
+                       eq(Res, {ok, Value});
                    not_found ->
                        %% Weird to be able to supply a tag, but must be STD_TAG...
                        Tag =/= ?STD_TAG orelse orddict:find({Bucket, Key}, Model) == error
@@ -326,7 +344,7 @@ mput(Pid, ObjSpecs) ->
 mput_next(S, _, [_Pid, ObjSpecs]) ->
     ?CMD_VALID(S, mput,
                lists:foldl(fun({add, Bucket, Key, _SubKey, Value}, #{model := Model, previous_keys := PK} = Acc) ->
-                                   Acc#{model => orddict:store({Bucket, Key}, Value, Model),
+                                   Acc#{model => orddict:store({Bucket, Key}, {Value, []}, Model),
                                         previous_keys => PK ++ [{Key, Bucket}]};
                               ({remove, Bucket, Key, _SubKey, _Value}, #{model := Model} = Acc) ->
                                    Acc#{model => orddict:erase({Bucket, Key}, Model)}
@@ -943,6 +961,15 @@ gen_bucket() ->
 
 gen_val() ->
     noshrink(binary(32)).
+
+gen_categories() ->
+    sublist(categories()).
+
+categories() ->
+    [dep, lib].
+
+gen_category() ->
+    elements(categories()).
 
 gen_key_in_bucket([]) ->
     {gen_key(), gen_bucket()};
