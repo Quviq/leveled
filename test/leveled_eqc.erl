@@ -186,7 +186,7 @@ put_pre(S) ->
 %% @doc put_args - Argument generator
 -spec put_args(S :: eqc_statem:symbolic_state()) -> eqc_gen:gen([term()]).
 put_args(#{leveled := Pid, previous_keys := PK, tag := Tag}) ->
-    ?LET(Categories, gen_categories(),
+    ?LET(Categories, gen_categories(Tag),
     ?LET({{Key, Bucket}, Value, IndexSpec, MetaData}, 
          {gen_key_in_bucket(PK), gen_val(), [{add, Cat, choose(1,5)} || Cat <- Categories ], []},
          case Tag of
@@ -599,7 +599,10 @@ indexfold_pre(S) ->
 
 indexfold_args(#{leveled := Pid, counter := Counter, previous_keys := PK}) ->
     ?LET({Key, Bucket}, gen_key_in_bucket(PK),
-         [Pid, oneof([Bucket, {Bucket, Key}]), gen_foldacc(2), {range, 1, 10}, {bool(), undefined},
+         [Pid, oneof([Bucket, {Bucket, Key}]), gen_foldacc(2), 
+          ?LET(N, choose(0,5), {gen_category(), N, N+2}), 
+          {true, %% {bool(),
+           undefined},
           Counter  %% add a unique counter
          ]).
 
@@ -617,14 +620,34 @@ indexfold(Pid, Constraint, FoldAccT, Range, TermHandling, _Counter) ->
     Folder.
 
 indexfold_next(#{folders := Folders} = S, SymFolder, 
-               [_, _Constraint, {Fun, Acc}, _Range, _TermHandling, Counter]) ->
+               [_, Constraint, {Fun, Acc}, {Category, From, To}, _TermHandling, Counter]) ->
+    ConstraintFun =
+        fun(B, K) ->
+                case Constraint of
+                    {B, KStart} -> K >= KStart;
+                    B -> true;
+                    _ -> false
+                end
+        end,
     S#{folders => 
            Folders ++ 
            [#{counter => Counter,
               type => indexfold,
               folder => SymFolder,
               reusable => true,
-              result => fun(Model) -> orddict:fold(fun({B, K}, _V, A) -> Fun(B, K, A) end, Acc, Model) end
+              result => fun(Model) ->
+                                
+                                Select = 
+                                    orddict:fold(fun({B, K}, {_V, Spec}, A) ->
+                                                         [ {B, {Idx, K}} || {Cat, Idx} <- Spec,
+                                                                            Cat == Category,
+                                                                            ConstraintFun(B, K),
+                                                                            Idx >= From, Idx =< To ] ++ A
+                                                 end, [], Model),
+                                lists:foldr(fun({B, NK}, A) ->
+                                                    Fun(B, NK, A)
+                                            end, Acc, Select)
+                        end 
               %% fold over new snapshot each time
              }],
        counter =>  Counter + 1}.
@@ -962,8 +985,12 @@ gen_bucket() ->
 gen_val() ->
     noshrink(binary(32)).
 
-gen_categories() ->
-    sublist(categories()).
+gen_categories(?RIAK_TAG) ->
+    sublist(categories());
+gen_categories(_) ->
+    %% for ?STD_TAG this seems to make little sense
+    [].
+
 
 categories() ->
     [dep, lib].
