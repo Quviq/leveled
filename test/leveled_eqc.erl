@@ -884,6 +884,7 @@ is_valid_cmd(S, mput) ->
 -spec prop_db() -> eqc:property().
 prop_db() ->
     Dir = "./leveled_data",
+    eqc:dont_print_counterexample( 
     ?LET(Shrinking, parameter(shrinking, false),
     ?FORALL({Kind, Cmds}, oneof([{seq, more_commands(20, commands(?MODULE))}, 
                                     {par, more_commands(2, parallel_commands(?MODULE))}]),
@@ -935,9 +936,8 @@ prop_db() ->
                                     ?WHENFAIL(eqc:format("~s\n", [os:cmd("ls -Rl " ++ Dir)]),
                                               empty_dir(Dir))},
                                    {pid_cleanup, equals(Wait, [])}]))))))))
-
         end))
-    end)).
+    end))).
 
 history({H, _, _}) -> H.
 result({_, _, Res}) -> Res.
