@@ -733,7 +733,7 @@ bucketlistfold_next(#{folders := Folders} = S, SymFolder,
                                     {first, []} ->
                                         Acc;
                                     {first, [First|_]} ->
-                                        lists:foldl(fun(B, A) -> Fun(B, A) end, Acc, [First])
+                                        lists:foldr(fun(B, A) -> Fun(B, A) end, Acc, [First])
                                 end
                         end        
              }],
@@ -797,6 +797,12 @@ fold_run_post(#{folders := Folders, leveled := Leveled, model := Model}, [Count,
                     end
             end
     end.
+
+fold_run_features(#{folders := Folders, leveled := Leveled}, [Count, _Folder], _Res) ->
+    #{type := Type} = get_foldobj(Folders, Count),
+    [ {fold_run, Type} || Leveled =/= undefined ] ++
+        [ fold_run_on_stopped_leveled || Leveled == undefined ] .
+
                
 %% --- Operation: fold_run on already used folder ---
 %% A fold that has already ran to completion should results in an exception when re-used.
