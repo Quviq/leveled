@@ -878,8 +878,8 @@ is_valid_cmd(S, mput) ->
 prop_db() ->
     Dir = "./leveled_data",
     ?LET(Shrinking, parameter(shrinking, false),
-    ?FORALL({Kind, Cmds}, more_commands(20, oneof([{seq, commands(?MODULE)}, 
-                                                   {par, parallel_commands(?MODULE)}])),
+    ?FORALL({Kind, Cmds}, oneof([{seq, more_commands(20, commands(?MODULE))}, 
+                                    {par, more_commands(2, parallel_commands(?MODULE))}]),
     begin
         delete_level_data(Dir),
         ?IMPLIES(empty_dir(Dir),
