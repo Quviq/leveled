@@ -188,7 +188,7 @@ put_pre(S) ->
 put_args(#{leveled := Pid, previous_keys := PK, tag := Tag}) ->
     ?LET(Categories, gen_categories(Tag),
     ?LET({{Key, Bucket}, Value, IndexSpec, MetaData}, 
-         {gen_key_in_bucket(PK), gen_val(), [{add, Cat, choose(1,5)} || Cat <- Categories ], []},
+         {gen_key_in_bucket(PK), gen_val(), [{add, Cat, gen_index_value()} || Cat <- Categories ], []},
          case Tag of
              ?STD_TAG -> [Pid, Bucket, Key, Value, IndexSpec, elements([none, Tag])]; 
              ?RIAK_TAG ->
@@ -385,7 +385,8 @@ head_post(#{model := Model} = S, [_Pid, Bucket, Key, Tag], Res) ->
                        orddict:find({Bucket, Key}, Model) =/= error;
                    not_found ->
                        %% Weird to be able to supply a tag, but must be STD_TAG...
-                       implies(lists:member(maps:get(start_opts, S), [{head_only, with_lookup}]), lists:member(Tag, [?STD_TAG, none, ?HEAD_TAG])) orelse 
+                       implies(lists:member(maps:get(start_opts, S), [{head_only, with_lookup}]), 
+                               lists:member(Tag, [?STD_TAG, none, ?HEAD_TAG])) orelse 
                        orddict:find({Bucket, Key}, Model) == error;
                    {unsupported_message, head} ->
                        Tag =/= ?HEAD_TAG
@@ -600,9 +601,9 @@ indexfold_pre(S) ->
 indexfold_args(#{leveled := Pid, counter := Counter, previous_keys := PK}) ->
     ?LET({Key, Bucket}, gen_key_in_bucket(PK),
          [Pid, oneof([Bucket, {Bucket, Key}]), gen_foldacc(2), 
-          ?LET(N, choose(0,5), {gen_category(), N, N+2}), 
-          {true, %% {bool(),
-           undefined},
+          ?LET({[N], M}, {gen_index_value(), choose(0,2)}, {gen_category(), [N], [N+M]}), 
+          {bool(),
+           oneof([undefined, gen_index_value()])},
           Counter  %% add a unique counter
          ]).
 
@@ -615,12 +616,16 @@ indexfold_adapt(#{leveled := Leveled}, [_, Constraint, FoldAccT, Range, TermHand
     %% Keep the counter!
     [Leveled, Constraint, FoldAccT, Range, TermHandling, Counter].
 
-indexfold(Pid, Constraint, FoldAccT, Range, TermHandling, _Counter) ->
+indexfold(Pid, Constraint, FoldAccT, Range, {_, undefined} = TermHandling, _Counter) ->
     {async, Folder} = leveled_bookie:book_indexfold(Pid, Constraint, FoldAccT, Range, TermHandling),
+    Folder;
+indexfold(Pid, Constraint, FoldAccT, Range, {ReturnTerms, RegExp}, _Counter) ->
+    {ok, RE} = re:compile(RegExp),
+    {async, Folder} = leveled_bookie:book_indexfold(Pid, Constraint, FoldAccT, Range, {ReturnTerms, RE}),
     Folder.
 
 indexfold_next(#{folders := Folders} = S, SymFolder, 
-               [_, Constraint, {Fun, Acc}, {Category, From, To}, _TermHandling, Counter]) ->
+               [_, Constraint, {Fun, Acc}, {Category, From, To}, {ReturnTerms, RegExp}, Counter]) ->
     ConstraintFun =
         fun(B, K) ->
                 case Constraint of
@@ -638,11 +643,18 @@ indexfold_next(#{folders := Folders} = S, SymFolder,
               result => fun(Model) ->
                                 Select = 
                                     orddict:fold(fun({B, K}, {_V, Spec}, A) ->
-                                                         [ {B, {Idx, K}} || {Cat, Idx} <- Spec,
-                                                                            Cat == Category,
-                                                                            ConstraintFun(B, K),
-                                                                            Idx >= From, Idx =< To ] ++ A
-                                                 end, [], Model),
+                                                         [ if ReturnTerms -> {B, {Idx, K}};
+                                                              not ReturnTerms -> {B, K}
+                                                           end || {Cat, Idx} <- Spec,
+                                                                  Cat == Category,
+                                                                  ConstraintFun(B, K),
+                                                                  RegExp == undefined orelse string:find(Idx, RegExp) =/= nomatch,
+                                                                  Idx >= From, Idx =< To ] ++ A
+                                                 end, [], Model),                                            
+                                %% Order is unspecified and we seem not to be able to get it right.
+                                %% This is noticeable when running a specific fold, which needs to touch
+                                %% the objects in the same order.
+                                %% We keep the same model as works for bucketlist
                                 lists:foldr(fun({B, NK}, A) ->
                                                     Fun(B, NK, A)
                                             end, Acc, Select)
@@ -653,8 +665,11 @@ indexfold_next(#{folders := Folders} = S, SymFolder,
 indexfold_post(_S, _, Res) ->
     is_function(Res).
 
-indexfold_features(_S, [_Pid, _Constraint, FoldAccT, _Range, _TermHandling, _Counter], _Res) ->
-    [{foldAccT, FoldAccT}]. %% This will be extracted for printing later
+indexfold_features(_S, [_Pid, Constraint, FoldAccT, _Range, {ReturnTerms, _}, _Counter], _Res) ->
+    [{foldAccT, FoldAccT}] ++  %% This will be extracted for printing later
+        [{index_fold, bucket} || not is_tuple(Constraint) ] ++
+        [{index_fold, bucket_and_primary_key} || is_tuple(Constraint)] ++
+        [{index_fold, return_terms, ReturnTerms} ].
 
 
 
@@ -798,10 +813,12 @@ fold_run_post(#{folders := Folders, leveled := Leveled, model := Model}, [Count,
             end
     end.
 
-fold_run_features(#{folders := Folders, leveled := Leveled}, [Count, _Folder], _Res) ->
+fold_run_features(#{folders := Folders, leveled := Leveled}, [Count, _Folder], Res) ->
     #{type := Type} = get_foldobj(Folders, Count),
     [ {fold_run, Type} || Leveled =/= undefined ] ++
-        [ fold_run_on_stopped_leveled || Leveled == undefined ] .
+        [ fold_run_on_stopped_leveled || Leveled == undefined ] ++
+        [ {fold_run, found_list, length(Res)}|| is_list(Res) ] ++
+         [ {fold_run, found_integer}|| is_integer(Res) ].
 
                
 %% --- Operation: fold_run on already used folder ---
@@ -1010,6 +1027,9 @@ categories() ->
 
 gen_category() ->
     elements(categories()).
+
+gen_index_value() ->
+    elements(["a", "r", "t", "s"]).
 
 gen_key_in_bucket([]) ->
     {gen_key(), gen_bucket()};
