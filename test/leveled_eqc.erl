@@ -407,13 +407,11 @@ head_features(#{deleted_keys := DK, previous_keys := PK}, [_Pid, Bucket, Key, _T
     end.
 
 
-
-
 %% --- Operation: delete ---
 %% @doc delete_pre/1 - Precondition for generation
 -spec delete_pre(S :: eqc_statem:symbolic_state()) -> boolean().
 delete_pre(S) ->
-    is_leveled_open(S).
+    is_leveled_open(S) andalso maps:get(tag, S) =/= ?RIAK_TAG.  %% issue #12
 
 %% @doc delete_args - Argument generator
 -spec delete_args(S :: eqc_statem:symbolic_state()) -> eqc_gen:gen([term()]).
@@ -629,7 +627,7 @@ indexfold_next(#{folders := Folders} = S, SymFolder,
     ConstraintFun =
         fun(B, K) ->
                 case Constraint of
-                    {B, KStart} -> K >= KStart;
+                    {B, KStart} -> K >= KStart;  %% issue #13
                     B -> true;
                     _ -> false
                 end
@@ -934,7 +932,7 @@ prop_db() ->
                     leveled_bookie:book_destroy(Pid)
             end,
 
-            Wait = wait_for_procs(Procs, 1500),
+            Wait = wait_for_procs(Procs, 10000),
             RunTime = erlang:system_time(millisecond) - StartTime,
 
             %% Since in parallel commands we don't have access to the state, we retrieve functions
