@@ -600,7 +600,7 @@ indexfold_pre(S) ->
 
 indexfold_args(#{leveled := Pid, counter := Counter, previous_keys := PK}) ->
     ?LET({Key, Bucket}, gen_key_in_bucket(PK),
-         [Pid, oneof([Bucket, {Bucket, Key}]), gen_foldacc(2), 
+         [Pid, oneof([Bucket, {Bucket, Key}]), gen_foldacc(3), 
           ?LET({[N], M}, {gen_index_value(), choose(0,2)}, {gen_category(), [N], [N+M]}), 
           {bool(),
            oneof([undefined, gen_index_value()])},
@@ -678,28 +678,30 @@ indexfold_features(_S, [_Pid, Constraint, FoldAccT, _Range, {ReturnTerms, _}, _C
 %% --- Operation: keylist folding ---
 %% slack discussion: "`book_keylist` only passes `Bucket` and `Key` into the accumulator, ignoring SubKey - 
 %% so I don't think this can be used in head_only mode to return results that make sense"
-keylistfold1_pre(S) ->
+%%
+%% There are also keylist functions that take a specific bucket and range into account. Not considered yet.
+keylistfold_pre(S) ->
     is_leveled_open(S).
 
-keylistfold1_args(#{leveled := Pid, counter := Counter, tag := Tag}) ->
-    [Pid, Tag, gen_foldacc(2),
+keylistfold_args(#{leveled := Pid, counter := Counter, tag := Tag}) ->
+    [Pid, Tag, gen_foldacc(3),
      Counter  %% add a unique counter
     ].
 
-keylistfold1_pre(#{leveled := Leveled}, [Pid, _Tag, _FoldAccT, _Counter]) ->
+keylistfold_pre(#{leveled := Leveled}, [Pid, _Tag, _FoldAccT, _Counter]) ->
     %% Make sure we operate on an existing Pid when shrinking
     %% Check start options validity as well?
     Pid == Leveled.
     
-keylistfold1_adapt(#{leveled := Leveled}, [_, Tag, FoldAccT, Counter]) ->
+keylistfold_adapt(#{leveled := Leveled}, [_, Tag, FoldAccT, Counter]) ->
     %% Keep the counter!
     [Leveled, Tag, FoldAccT, Counter].
 
-keylistfold1(Pid, Tag, FoldAccT, _Counter) ->
+keylistfold(Pid, Tag, FoldAccT, _Counter) ->
     {async, Folder} = leveled_bookie:book_keylist(Pid, Tag, FoldAccT),
     Folder.
 
-keylistfold1_next(#{folders := Folders, model := Model} = S, SymFolder, 
+keylistfold_next(#{folders := Folders, model := Model} = S, SymFolder, 
                [_, _Tag, {Fun, Acc}, Counter]) ->
     S#{folders => 
            Folders ++ 
@@ -707,21 +709,23 @@ keylistfold1_next(#{folders := Folders, model := Model} = S, SymFolder,
               type => keylist,
               folder => SymFolder,
               reusable => false,
-              result => orddict:fold(fun({B, K}, _V, A) -> Fun(B, K, A) end, Acc, Model)           
+              result => fun(_) -> orddict:fold(fun({B, K}, _V, A) -> Fun(B, K, A) end, Acc, Model) end
              }],
        counter => Counter + 1}.
 
-keylistfold1_post(_S, _, Res) ->
+keylistfold_post(_S, _, Res) ->
     is_function(Res).
 
-keylistfold1_features(_S, [_Pid, _Tag, FoldAccT, _Counter], _Res) ->
+keylistfold_features(_S, [_Pid, _Tag, FoldAccT, _Counter], _Res) ->
     [{foldAccT, FoldAccT}]. %% This will be extracted for printing later
+
+
 %% --- Operation: bucketlistfold ---
 bucketlistfold_pre(S) ->
    is_leveled_open(S).
 
 bucketlistfold_args(#{leveled := Pid, counter := Counter, tag := Tag}) ->
-    [Pid, Tag, gen_foldacc(1), elements([first, all]), Counter].
+    [Pid, Tag, gen_foldacc(2), elements([first, all]), Counter].
 
 bucketlistfold_pre(#{leveled := Leveled}, [Pid, _Tag, _FoldAccT, _Constraints, _]) ->
      Pid == Leveled.
@@ -791,18 +795,12 @@ fold_run_next(#{folders := Folders} = S, _Value, [Counter, _Folder]) ->
     end.
     
 fold_run_post(#{folders := Folders, leveled := Leveled, model := Model}, [Count, _], Res) ->
-    FoldObj = get_foldobj(Folders, Count),
     case Leveled of 
         undefined ->
             is_exit(Res);
         _ ->
-            case FoldObj of
-                #{reusable := false, result := Result} ->
-                    eq(Res, Result);
-                #{result := ResFun} ->
-                    MRes = ResFun(Model),
-                    eq(Res, MRes)
-            end
+            #{result := ResFun} = get_foldobj(Folders, Count),
+            eq(Res, ResFun(Model))
     end.
 
 fold_run_features(#{folders := Folders, leveled := Leveled}, [Count, _Folder], Res) ->
@@ -1033,13 +1031,17 @@ gen_key_in_bucket(Previous) ->
                     {2, {K, B}}])).
 
 gen_foldacc(2) ->
+    ?SHRINK(oneof([{eqc_fun:function2(int()), int()},
+                   {eqc_fun:function2(list(int())), list(int())}]),
+            [fold_buckets()]);
+gen_foldacc(3) ->
     ?SHRINK(oneof([{eqc_fun:function3(int()), int()},
                    {eqc_fun:function3(list(int())), list(int())}]),
             [fold_collect()]);
-gen_foldacc(1) ->
-    ?SHRINK(oneof([{eqc_fun:function2(int()), int()},
-                   {eqc_fun:function2(list(int())), list(int())}]),
-            [fold_buckets()]).
+gen_foldacc(4) ->
+    ?SHRINK(oneof([{eqc_fun:function4(int()), int()},
+                   {eqc_fun:function4(list(int())), list(int())}]),
+            [fold_objects()]).
 
 
 
@@ -1047,7 +1049,10 @@ fold_buckets() ->
     {fun(B, Acc) -> [B | Acc] end, []}.
              
 fold_collect() ->
-    {fun(X, Y, Z) -> [{X, Y} | Z] end, []}.
+    {fun(X, Y, Acc) -> [{X, Y} | Acc] end, []}.
+
+fold_objects() ->
+    {fun(X, Y, Z, Acc) -> [{X, Y, Z} | Acc] end, []}.
 
 %% This makes system fall over
 fold_collect_no_acc() ->
