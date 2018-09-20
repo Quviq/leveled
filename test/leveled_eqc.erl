@@ -611,7 +611,7 @@ indexfold_pre(S) ->
 
 indexfold_args(#{leveled := Pid, counter := Counter, previous_keys := PK}) ->
     ?LET({Key, Bucket}, gen_key_in_bucket(PK),
-         [Pid, oneof([Bucket, {Bucket, Key}]), gen_foldacc(3), 
+         [Pid, default(Bucket, {Bucket, Key}), gen_foldacc(3), 
           ?LET({[N], M}, {gen_index_value(), choose(0,2)}, {gen_category(), [N], [N+M]}), 
           {bool(),
            oneof([undefined, gen_index_value()])},
@@ -653,23 +653,21 @@ indexfold_next(#{folders := Folders} = S, SymFolder,
               reusable => true,
               result => fun(Model) ->
                                 Select = 
-                                    orddict:fold(fun({B, K}, {_V, Spec}, A) ->
-                                                         [ if ReturnTerms -> {B, {Idx, K}};
-                                                              not ReturnTerms -> {B, K}
-                                                           end || {Cat, Idx} <- Spec,
-                                                                  Idx >= From, Idx =< To,
-                                                                  Cat == Category,
-                                                                  ConstraintFun(B, K, Idx == From),
-                                                                  RegExp == undefined orelse string:find(Idx, RegExp) =/= nomatch
-                                                         ] ++ A
-                                                 end, [], Model),                                            
-                                %% Order is unspecified and we seem not to be able to get it right.
-                                %% This is noticeable when running a specific fold, which needs to touch
-                                %% the objects in the same order.
-                                %% We keep the same model as works for bucketlist
-                                lists:foldl(fun({B, NK}, A) ->
+                                    lists:sort(
+                                      orddict:fold(fun({B, K}, {_V, Spec}, A) ->
+                                                           [ {B, {Idx, K}}
+                                                             || {Cat, Idx} <- Spec,
+                                                                Idx >= From, Idx =< To,
+                                                                Cat == Category,
+                                                                ConstraintFun(B, K, Idx == From),
+                                                                RegExp == undefined orelse string:find(Idx, RegExp) =/= nomatch
+                                                           ] ++ A
+                                                   end, [], Model)),
+                                lists:foldl(fun({B, NK}, A) when ReturnTerms ->
+                                                    Fun(B, NK, A);
+                                               ({B, {_, NK}}, A) ->
                                                     Fun(B, NK, A)
-                                            end, Acc, lists:sort(Select))
+                                            end, Acc, Select)
                         end 
              }],
        counter =>  Counter + 1}.
