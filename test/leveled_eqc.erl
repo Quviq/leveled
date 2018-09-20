@@ -627,9 +627,9 @@ indexfold(Pid, Constraint, FoldAccT, Range, {ReturnTerms, RegExp}, _Counter) ->
 indexfold_next(#{folders := Folders} = S, SymFolder, 
                [_, Constraint, {Fun, Acc}, {Category, From, To}, {ReturnTerms, RegExp}, Counter]) ->
     ConstraintFun =
-        fun(B, K) ->
+        fun(B, K, Bool) ->
                 case Constraint of
-                    {B, KStart} -> K >= KStart;
+                    {B, KStart} -> not Bool orelse K >= KStart;
                     B -> true;
                     _ -> false
                 end
@@ -646,18 +646,19 @@ indexfold_next(#{folders := Folders} = S, SymFolder,
                                                          [ if ReturnTerms -> {B, {Idx, K}};
                                                               not ReturnTerms -> {B, K}
                                                            end || {Cat, Idx} <- Spec,
+                                                                  Idx >= From, Idx =< To,
                                                                   Cat == Category,
-                                                                  ConstraintFun(B, K),
-                                                                  RegExp == undefined orelse string:find(Idx, RegExp) =/= nomatch,
-                                                                  Idx >= From, Idx =< To ] ++ A
+                                                                  ConstraintFun(B, K, Idx == From),
+                                                                  RegExp == undefined orelse string:find(Idx, RegExp) =/= nomatch
+                                                         ] ++ A
                                                  end, [], Model),                                            
                                 %% Order is unspecified and we seem not to be able to get it right.
                                 %% This is noticeable when running a specific fold, which needs to touch
                                 %% the objects in the same order.
                                 %% We keep the same model as works for bucketlist
-                                lists:foldr(fun({B, NK}, A) ->
+                                lists:foldl(fun({B, NK}, A) ->
                                                     Fun(B, NK, A)
-                                            end, Acc, Select)
+                                            end, Acc, lists:sort(Select))
                         end 
              }],
        counter =>  Counter + 1}.
@@ -800,16 +801,7 @@ fold_run_post(#{folders := Folders, leveled := Leveled, model := Model}, [Count,
                     eq(Res, Result);
                 #{result := ResFun} ->
                     MRes = ResFun(Model),
-                    case {is_list(Res), is_list(MRes)} of
-                        {true, true} ->
-                            %% order not important
-                            case {Res--MRes, MRes--Res} of
-                                {[], []} -> true;
-                                {Extra, MExtra} -> {Extra, disjunct, MExtra}
-                            end;
-                        _ ->
-                            eq(Res, MRes)
-                    end
+                    eq(Res, MRes)
             end
     end.
 
@@ -1029,7 +1021,8 @@ gen_category() ->
     elements(categories()).
 
 gen_index_value() ->
-    elements(["a", "r", "t", "s"]).
+    %% Carefully selected to have one out-layer and several border cases.
+    [elements("arts")].
 
 gen_key_in_bucket([]) ->
     {gen_key(), gen_bucket()};
