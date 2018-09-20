@@ -421,11 +421,22 @@ delete_args(#{leveled := Pid, previous_keys := PK, tag := Tag}) ->
     ?LET({Key, Bucket}, gen_key_in_bucket(PK),
          [Pid, Bucket, Key, [], Tag]).
 
-delete_pre(#{leveled := Leveled}, [Pid, _, _Key, _Spec, _Tag]) ->
-    Pid == Leveled.
+delete_pre(#{leveled := Leveled, model := Model}, [Pid, Bucket, Key, Spec, _Tag]) ->
+    Pid == Leveled andalso
+        case orddict:find({Bucket, Key}, Model) of
+            error -> true;
+            {ok, {_, OldSpec}} ->
+                Spec == OldSpec
+        end.
 
-delete_adapt(#{leveled := Leveled}, [_, Bucket, Key, Spec, Tag]) ->
-    [ Leveled, Bucket, Key, Spec, Tag ].
+delete_adapt(#{leveled := Leveled, model := Model}, [_, Bucket, Key, Spec, Tag]) ->
+    NewSpec = 
+        case orddict:find({Bucket, Key}, Model) of
+            error -> Spec;
+            {ok, {_, OldSpec}} ->
+                Spec == OldSpec
+        end,
+    [ Leveled, Bucket, Key, NewSpec, Tag ].
 
 %% @doc delete - The actual operation
 delete(Pid, Bucket, Key, Spec, ?STD_TAG) ->
