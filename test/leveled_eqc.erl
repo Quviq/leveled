@@ -774,6 +774,51 @@ bucketlistfold_post(_S, [_Pid, _Tag, _FoldAccT, _Constraints, _], Res) ->
 bucketlistfold_features(_S, [_Pid, _Tag, FoldAccT, _Constraints, _], _Res) ->
     [ {foldAccT, FoldAccT} ].
 
+%% --- Operation: objectfold ---
+objectfold_pre(S) ->
+    is_leveled_open(S).
+
+objectfold_args(#{leveled := Pid, counter := Counter, tag := Tag}) ->
+    [Pid, Tag, gen_foldacc(4), bool(), Counter].
+
+objectfold_pre(#{leveled := Leveled}, [Pid, _Tag, _FoldAccT, _Snapshot, _Counter]) ->
+    Leveled == Pid.
+
+objectfold_adapt(#{leveled := Leveled}, [_Pid, Tag, FoldAccT, Snapshot, Counter]) ->
+    [Leveled, Tag, FoldAccT, Snapshot, Counter].
+
+objectfold(Pid, Tag, FoldAccT, Snapshot, _Counter) ->
+    {async, Folder} = leveled_bookie:book_objectfold(Pid, Tag, FoldAccT, Snapshot),
+    Folder.
+
+objectfold_next(#{folders := Folders, model := Model} = S, SymFolder, 
+                [_Pid, _Tag, {Fun, Acc}, Snapshot, Counter]) ->
+    S#{folders => 
+           Folders ++ 
+           [#{counter => Counter,
+              type => objectfold,
+              folder => SymFolder, 
+              reusable => not Snapshot,
+              result => fun(M) ->
+                                OnModel =  
+                                    case Snapshot of
+                                        true -> Model;
+                                        false -> M
+                                    end,
+                                Objs = orddict:fold(fun({B, K}, {V, _}, A) -> [{B, K, V} | A] end, [], OnModel),
+                                lists:foldr(fun({B, K, V}, A) -> Fun(B, K, V, A) end, Acc, Objs)
+                        end
+             }],
+       counter => Counter + 1}.
+
+objectfold_post(_S, [_Pid, _Tag, _FoldAccT, _Snapshot, _Counter], Res) ->
+    is_function(Res).
+
+objectfold_features(_S, [_Pid, _Tag, FoldAccT, _Snapshot, _Counter], _Res) ->
+    [{foldAccT, FoldAccT}]. %% This will be extracted for printing later
+
+
+
 
 %% --- Operation: fold_run ---
 fold_run_pre(S) ->
