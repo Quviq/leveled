@@ -60,6 +60,7 @@ implies(B1, B2) -> (not B1 orelse B2).
 %% start_opts should not be added to this map, it is added only when the system is started the first time.
 initial_state() ->
     #{dir => {var, dir},
+      sut => sut,
       leveled => undefined,   %% to make adapt happy after failing pre/1
       counter => 0,
       model => orddict:new(),
@@ -76,32 +77,32 @@ init_backend_pre(S) ->
 
 %% @doc init_backend_args - Argument generator
 -spec init_backend_args(S :: eqc_statem:symbolic_state()) -> eqc_gen:gen([term()]).
-init_backend_args(#{dir := Dir} = S) ->
+init_backend_args(#{dir := Dir, sut := Name} = S) ->
     case maps:get(start_opts, S, undefined) of
         undefined ->
             [ default(?RIAK_TAG, ?STD_TAG),  %% Just test one tag at a time
-              [{root_path, Dir} | gen_opts()] ];
+              [{root_path, Dir} | gen_opts()], Name ];
         Opts ->
             %% root_path is part of existing options
-            [ maps:get(tag, S), Opts]
+            [ maps:get(tag, S), Opts, Name ]
     end.
 
-init_backend_pre(S, [Tag, Options]) ->
+init_backend_pre(S, [Tag, Options, _]) ->
     %% for shrinking
+    PreviousOptions = maps:get(start_opts, S, undefined),
     maps:get(tag, S, Tag) == Tag andalso 
-    maps:get(start_opts, S, Options) == Options.
+        PreviousOptions == undefined orelse PreviousOptions == Options.
 
-init_backend_adapt(S, [Tag, Options]) ->
-    [ maps:get(tag, S, Tag), maps:get(start_opts, S, Options) ].
-
+init_backend_adapt(S, [Tag, Options, Name]) ->
+    {call, ?MODULE, init_backend, [ maps:get(tag, S, Tag), maps:get(start_opts, S, Options), Name]}.
 
 %% @doc init_backend - The actual operation
 %% Start the database and read data from disk
-init_backend(_Tag, Options) ->
+init_backend(_Tag, Options, Name) ->
     case leveled_bookie:book_start(Options) of
         {ok, Bookie} ->
             unlink(Bookie),
-            erlang:register(sut, Bookie),
+            erlang:register(Name, Bookie),
             Bookie;
         Error -> Error
     end.
@@ -112,7 +113,7 @@ init_backend(_Tag, Options) ->
          Var  :: eqc_statem:var() | term(),
          Args :: [term()],
          NewS :: eqc_statem:symbolic_state() | eqc_state:dynamic_state().
-init_backend_next(S, LevelEdPid, [Tag, Options]) ->
+init_backend_next(S, LevelEdPid, [Tag, Options, _]) ->
     S#{leveled => LevelEdPid, start_opts => Options, tag => Tag}.
 
 %% @doc init_backend_post - Postcondition for init_backend
@@ -120,10 +121,10 @@ init_backend_next(S, LevelEdPid, [Tag, Options]) ->
     when S    :: eqc_state:dynamic_state(),
          Args :: [term()],
          Res  :: term().
-init_backend_post(_S, [_, _Options], LevelEdPid) ->
+init_backend_post(_S, [_, _Options, _], LevelEdPid) ->
     is_pid(LevelEdPid).
 
-init_backend_features(_S, [_Tag, Options], _Res) ->
+init_backend_features(_S, [_Tag, Options, _], _Res) ->
     [{start_options, Options}].
 
 
@@ -143,7 +144,7 @@ stop_pre(#{leveled := Leveled}, [Pid]) ->
     Pid == Leveled.
 
 stop_adapt(#{leveled := Leveled}, [_]) ->
-    [Leveled].
+     {call, ?MODULE, stop, [Leveled]}.
 
 %% @doc stop - The actual operation
 %% Stop the server, but the values are still on disk
@@ -200,7 +201,7 @@ put_pre(#{leveled := Leveled}, [Pid, _Bucket, _Key, _Value, _, _]) ->
     Pid == Leveled.
 
 put_adapt(#{leveled := Leveled}, [_, Bucket, Key, Value, Spec, Tag]) ->
-    [ Leveled, Bucket, Key, Value, Spec, Tag ].
+    {call, ?MODULE, put, [ Leveled, Bucket, Key, Value, Spec, Tag ]}.
 
 %% @doc put - The actual operation
 put(Pid, Bucket, Key, Value, Spec, none) ->
@@ -277,7 +278,7 @@ get_pre(#{leveled := Leveled}, [Pid, _Bucket, _Key, _Tag]) ->
     Pid == Leveled.
 
 get_adapt(#{leveled := Leveled}, [_, Bucket, Key, Tag]) ->    
-    [Leveled, Bucket, Key, Tag].
+    {call, ?MODULE, get, [Leveled, Bucket, Key, Tag]}.
 
 %% @doc get_post - Postcondition for get
 -spec get_post(S, Args, Res) -> true | term()
@@ -334,7 +335,7 @@ mput_pre(#{leveled := Leveled}, [Pid, ObjSpecs]) ->
     Pid == Leveled andalso no_key_dups(ObjSpecs) == ObjSpecs.
 
 mput_adapt(#{leveled := Leveled}, [_, ObjSpecs]) ->
-    [ Leveled, no_key_dups(ObjSpecs) ].
+    {call, ?MODULE, mput, [ Leveled, no_key_dups(ObjSpecs) ]}.
 
 %% @doc put - The actual operation
 mput(Pid, ObjSpecs) ->
@@ -371,7 +372,7 @@ head_pre(#{leveled := Leveled}, [Pid, _Bucket, _Key, _Tag]) ->
     Pid == Leveled.
 
 head_adapt(#{leveled := Leveled}, [_, Bucket, Key, Tag]) ->    
-    [Leveled, Bucket, Key, Tag].
+    {call, ?MODULE, head, [Leveled, Bucket, Key, Tag]}.
 
 head(Pid, Bucket, Key, none) ->
     leveled_bookie:book_head(Pid, Bucket, Key);
@@ -436,7 +437,7 @@ delete_adapt(#{leveled := Leveled, model := Model}, [_, Bucket, Key, Spec, Tag])
             {ok, {_, OldSpec}} ->
                 Spec == OldSpec
         end,
-    [ Leveled, Bucket, Key, NewSpec, Tag ].
+    {call, ?MODULE, delete, [ Leveled, Bucket, Key, NewSpec, Tag ]}.
 
 %% @doc delete - The actual operation
 delete(Pid, Bucket, Key, Spec, ?STD_TAG) ->
@@ -495,7 +496,7 @@ is_empty_pre(#{leveled := Leveled}, [Pid, _]) ->
     Pid == Leveled.
 
 is_empty_adapt(#{leveled := Leveled}, [_, Tag]) ->
-    [Leveled, Tag].
+    {call, ?MODULE, delete, [Leveled, Tag]}.
 
 %% @doc is_empty - The actual operation
 is_empty(Pid, Tag) ->
@@ -532,25 +533,24 @@ drop_pre(S) ->
 %% Generate start options used when restarting
 -spec drop_args(S :: eqc_statem:symbolic_state()) -> eqc_gen:gen([term()]).
 drop_args(#{leveled := Pid, dir := Dir} = S) ->
-    ?LET([Tag, _], init_backend_args(S),
-         [Pid, Tag, [{root_path, Dir} | gen_opts()]]).
+    ?LET([Tag, _, Name], init_backend_args(S),
+         [Pid, Tag, [{root_path, Dir} | gen_opts()], Name]).
 
-drop_pre(#{leveled := Leveled}, [Pid, _Tag, _Opts]) ->
+drop_pre(#{leveled := Leveled}, [Pid, _Tag, _Opts, _]) ->
     Pid == Leveled.
 
-drop_adapt(#{leveled := Leveled}, [_Pid, Tag, Opts]) ->
-    [Leveled, Tag, Opts].
+drop_adapt(#{leveled := Leveled}, [_Pid, Tag, Opts, Name]) ->
+    {call, ?MODULE, drop, [Leveled, Tag, Opts, Name]}.
     
-%% @doc drop - The actual operation
-%% Remove fles from disk (directory structure may remain) and start a new clean database
-drop(Pid, Tag, Opts) ->
+%% Remove files from disk (directory structure may remain) and start a new clean database
+drop(Pid, Tag, Opts, Name) ->
     Mon = erlang:monitor(process, Pid),
     ok = leveled_bookie:book_destroy(Pid),
     receive
         {'DOWN', Mon, _Type, Pid, _Info} ->
-            init_backend(Tag, Opts)
+            init_backend(Tag, Opts, Name)
     after 5000 ->
-            {still_alive, Pid}
+            {still_alive, Pid, Name}
     end.
 
 %% @doc drop_next - Next state function
@@ -559,23 +559,23 @@ drop(Pid, Tag, Opts) ->
          Var  :: eqc_statem:var() | term(),
          Args :: [term()],
          NewS :: eqc_statem:symbolic_state() | eqc_state:dynamic_state().
-drop_next(S, Value, [Pid, Tag, Opts]) ->
+drop_next(S, Value, [Pid, Tag, Opts, Name]) ->
     S1 = stop_next(S, Value, [Pid]),
     init_backend_next(S1#{model => orddict:new()}, 
-                      Value, [Tag, Opts]).
+                      Value, [Tag, Opts, Name]).
 
 %% @doc drop_post - Postcondition for drop
 -spec drop_post(S, Args, Res) -> true | term()
     when S    :: eqc_state:dynamic_state(),
          Args :: [term()],
          Res  :: term().
-drop_post(_S, [_Pid, _Tag, _Opts], NewPid) ->
+drop_post(_S, [_Pid, _Tag, _Opts, _], NewPid) ->
     case is_pid(NewPid) of
         true  -> true;
         false -> NewPid
     end.
 
-drop_features(#{model := Model}, [_Pid, _Tag, _Opts], _Res) ->
+drop_features(#{model := Model}, [_Pid, _Tag, _Opts, _], _Res) ->
     Size = orddict:size(Model),
     [{drop, empty} || Size == 0 ] ++ [{drop, Size div 10} || Size > 0 ].
 
@@ -592,7 +592,7 @@ kill_pre(#{leveled := Leveled}, [Pid]) ->
     Pid == Leveled.
 
 kill_adapt(#{leveled := Leveled}, [_]) ->
-    [ Leveled ].
+    {call, ?MODULE, kill, [ Leveled ]}.
 
 kill(Pid) ->
     exit(Pid, kill),
@@ -625,7 +625,7 @@ indexfold_pre(#{leveled := Leveled}, [Pid, _Constraint, _FoldAccT, _Range, _Term
     
 indexfold_adapt(#{leveled := Leveled}, [_, Constraint, FoldAccT, Range, TermHandling, Counter]) ->
     %% Keep the counter!
-    [Leveled, Constraint, FoldAccT, Range, TermHandling, Counter].
+    {call, ?MODULE, indexfold, [Leveled, Constraint, FoldAccT, Range, TermHandling, Counter]}.
 
 indexfold(Pid, Constraint, FoldAccT, Range, {_, undefined} = TermHandling, _Counter) ->
     {async, Folder} = leveled_bookie:book_indexfold(Pid, Constraint, FoldAccT, Range, TermHandling),
@@ -704,7 +704,7 @@ keylistfold_pre(#{leveled := Leveled}, [Pid, _Tag, _FoldAccT, _Counter]) ->
     
 keylistfold_adapt(#{leveled := Leveled}, [_, Tag, FoldAccT, Counter]) ->
     %% Keep the counter!
-    [Leveled, Tag, FoldAccT, Counter].
+    {call, ?MODULE, keylistfold, [Leveled, Tag, FoldAccT, Counter]}.
 
 keylistfold(Pid, Tag, FoldAccT, _Counter) ->
     {async, Folder} = leveled_bookie:book_keylist(Pid, Tag, FoldAccT),
@@ -740,7 +740,7 @@ bucketlistfold_pre(#{leveled := Leveled}, [Pid, _Tag, _FoldAccT, _Constraints, _
      Pid == Leveled.
 
 bucketlistfold_adapt(#{leveled := Leveled}, [_Pid, Tag, FoldAccT, Constraints, Counter]) ->
-    [Leveled, Tag, FoldAccT, Constraints, Counter].
+    {call, ?MODULE, bucketlistfold, [Leveled, Tag, FoldAccT, Constraints, Counter]}.
 
 bucketlistfold(Pid, Tag, FoldAccT, Constraints, _) ->
     {async, Folder} = leveled_bookie:book_bucketlist(Pid, Tag, FoldAccT, Constraints),
@@ -785,7 +785,7 @@ objectfold_pre(#{leveled := Leveled}, [Pid, _Tag, _FoldAccT, _Snapshot, _Counter
     Leveled == Pid.
 
 objectfold_adapt(#{leveled := Leveled}, [_Pid, Tag, FoldAccT, Snapshot, Counter]) ->
-    [Leveled, Tag, FoldAccT, Snapshot, Counter].
+    {call, ?MODULE, objectfold, [Leveled, Tag, FoldAccT, Snapshot, Counter]}.
 
 objectfold(Pid, Tag, FoldAccT, Snapshot, _Counter) ->
     {async, Folder} = leveled_bookie:book_objectfold(Pid, Tag, FoldAccT, Snapshot),
@@ -972,7 +972,7 @@ prop_db() ->
                            ],
             StartOptionFeatures = [ lists:keydelete(root_path, 1, Feature) || {start_options, Feature} <- call_features(history(RunResult)) ],
 
-            case whereis(sut) of
+            case whereis(maps:get(sut, initial_state())) of
                 undefined -> delete_level_data(Dir);
                 Pid when is_pid(Pid) ->
                     leveled_bookie:book_destroy(Pid)
