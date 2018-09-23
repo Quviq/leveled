@@ -60,6 +60,7 @@ implies(B1, B2) -> (not B1 orelse B2).
 %% start_opts should not be added to this map, it is added only when the system is started the first time.
 initial_state() ->
     #{dir => {var, dir},
+      sut => sut,
       leveled => undefined,   %% to make adapt happy after failing pre/1
       counter => 0,
       model => orddict:new(),
@@ -69,72 +70,54 @@ initial_state() ->
      }.
 
 %% --- Operation: init_backend ---
-%% @doc init_backend_pre/1 - Precondition for generation
--spec init_backend_pre(S :: eqc_statem:symbolic_state()) -> boolean().
 init_backend_pre(S) ->
     not is_leveled_open(S).
 
-%% @doc init_backend_args - Argument generator
--spec init_backend_args(S :: eqc_statem:symbolic_state()) -> eqc_gen:gen([term()]).
-init_backend_args(#{dir := Dir} = S) ->
+init_backend_args(#{dir := Dir, sut := Name} = S) ->
     case maps:get(start_opts, S, undefined) of
         undefined ->
             [ default(?RIAK_TAG, ?STD_TAG),  %% Just test one tag at a time
-              [{root_path, Dir} | gen_opts()] ];
+              [{root_path, Dir} | gen_opts()], Name ];
         Opts ->
             %% root_path is part of existing options
-            [ maps:get(tag, S), Opts]
+            [ maps:get(tag, S), Opts, Name ]
     end.
 
-init_backend_pre(S, [Tag, Options]) ->
+init_backend_pre(S, [Tag, Options, _]) ->
     %% for shrinking
+    PreviousOptions = maps:get(start_opts, S, undefined),
     maps:get(tag, S, Tag) == Tag andalso 
-    maps:get(start_opts, S, Options) == Options.
+        PreviousOptions == undefined orelse PreviousOptions == Options.
 
-init_backend_adapt(S, [Tag, Options]) ->
-    [ maps:get(tag, S, Tag), maps:get(start_opts, S, Options) ].
-
+init_backend_adapt(S, [Tag, Options, Name]) ->
+    {call, ?MODULE, init_backend, [ maps:get(tag, S, Tag), maps:get(start_opts, S, Options), Name]}.
 
 %% @doc init_backend - The actual operation
 %% Start the database and read data from disk
-init_backend(_Tag, Options) ->
+init_backend(_Tag, Options, Name) ->
     case leveled_bookie:book_start(Options) of
         {ok, Bookie} ->
             unlink(Bookie),
-            erlang:register(sut, Bookie),
+            erlang:register(Name, Bookie),
             Bookie;
         Error -> Error
     end.
 
-%% @doc init_backend_next - Next state function
--spec init_backend_next(S, Var, Args) -> NewS
-    when S    :: eqc_statem:symbolic_state() | eqc_state:dynamic_state(),
-         Var  :: eqc_statem:var() | term(),
-         Args :: [term()],
-         NewS :: eqc_statem:symbolic_state() | eqc_state:dynamic_state().
-init_backend_next(S, LevelEdPid, [Tag, Options]) ->
+init_backend_next(S, LevelEdPid, [Tag, Options, _]) ->
     S#{leveled => LevelEdPid, start_opts => Options, tag => Tag}.
 
-%% @doc init_backend_post - Postcondition for init_backend
--spec init_backend_post(S, Args, Res) -> true | term()
-    when S    :: eqc_state:dynamic_state(),
-         Args :: [term()],
-         Res  :: term().
-init_backend_post(_S, [_, _Options], LevelEdPid) ->
+init_backend_post(_S, [_, _Options, _], LevelEdPid) ->
     is_pid(LevelEdPid).
 
-init_backend_features(_S, [_Tag, Options], _Res) ->
+init_backend_features(_S, [_Tag, Options, _], _Res) ->
     [{start_options, Options}].
 
 
 %% --- Operation: stop ---
-%% @doc stop_pre/1 - Precondition for generation
--spec stop_pre(S :: eqc_statem:symbolic_state()) -> boolean().
 stop_pre(S) ->
     is_leveled_open(S).
 
 %% @doc stop_args - Argument generator
--spec stop_args(S :: eqc_statem:symbolic_state()) -> eqc_gen:gen([term()]).
 stop_args(#{leveled := Pid}) ->
     [Pid].
 
@@ -150,23 +133,12 @@ stop_adapt(#{leveled := Leveled}, [_]) ->
 stop(Pid) ->
     ok = leveled_bookie:book_close(Pid).
 
-%% @doc stop_next - Next state function
--spec stop_next(S, Var, Args) -> NewS
-    when S    :: eqc_statem:symbolic_state() | eqc_state:dynamic_state(),
-         Var  :: eqc_statem:var() | term(),
-         Args :: [term()],
-         NewS :: eqc_statem:symbolic_state() | eqc_state:dynamic_state().
 stop_next(S, _Value, [_Pid]) ->
     S#{leveled => undefined,
        folders => [],
        used_folders => [],
        stop_folders => maps:get(folders, S, []) ++ maps:get(used_folders, S, [])}.  
 
-%% @doc stop_post - Postcondition for stop
--spec stop_post(S, Args, Res) -> true | term()
-    when S    :: eqc_state:dynamic_state(),
-         Args :: [term()],
-         Res  :: term().
 stop_post(_S, [Pid], _Res) ->
     Mon = erlang:monitor(process, Pid),
     receive
@@ -178,13 +150,9 @@ stop_post(_S, [Pid], _Res) ->
 
 
 %% --- Operation: put ---
-%% @doc put_pre/1 - Precondition for generation
--spec put_pre(S :: eqc_statem:symbolic_state()) -> boolean().
 put_pre(S) ->
     is_leveled_open(S).
 
-%% @doc put_args - Argument generator
--spec put_args(S :: eqc_statem:symbolic_state()) -> eqc_gen:gen([term()]).
 put_args(#{leveled := Pid, previous_keys := PK, tag := Tag}) ->
     ?LET(Categories, gen_categories(Tag),
     ?LET({{Key, Bucket}, Value, IndexSpec, MetaData}, 
@@ -208,12 +176,6 @@ put(Pid, Bucket, Key, Value, Spec, none) ->
 put(Pid, Bucket, Key, Value, Spec, Tag) ->
     leveled_bookie:book_put(Pid, Bucket, Key, Value, Spec, Tag).
 
-%% @doc put_next - Next state function
--spec put_next(S, Var, Args) -> NewS
-    when S    :: eqc_statem:symbolic_state() | eqc_state:dynamic_state(),
-         Var  :: eqc_statem:var() | term(),
-         Args :: [term()],
-         NewS :: eqc_statem:symbolic_state() | eqc_state:dynamic_state().
 put_next(#{model := Model, previous_keys := PK} = S, _Value, [_Pid, Bucket, Key, Value, Spec, _Tag]) ->
     ?CMD_VALID(S, put,
                begin
@@ -231,11 +193,6 @@ put_next(#{model := Model, previous_keys := PK} = S, _Value, [_Pid, Bucket, Key,
 put_post(S, [_, _, _, _, _, _], Res) ->
     ?CMD_VALID(S, put, eq(Res, ok), eq(Res, {unsupported_message, put})).
 
-%% @doc put_features - Collects a list of features of this call with these arguments.
--spec put_features(S, Args, Res) -> list(any())
-    when S    :: eqc_statem:dynmic_state(),
-         Args :: [term()],
-         Res  :: term().
 put_features(#{previous_keys := PK} = S, [_Pid, Bucket, Key, _Value, _, Tag], _Res) ->
     ?CMD_VALID(S, put,
                case 
@@ -256,13 +213,9 @@ merge_index_spec(Spec, [{remove, Cat, Idx} | Rest]) ->
 
 
 %% --- Operation: get ---
-%% @doc get_pre/1 - Precondition for generation
--spec get_pre(S :: eqc_statem:symbolic_state()) -> boolean().
 get_pre(S) ->
     is_leveled_open(S).
 
-%% @doc get_args - Argument generator
--spec get_args(S :: eqc_statem:symbolic_state()) -> eqc_gen:gen([term()]).
 get_args(#{leveled := Pid, previous_keys := PK, tag := Tag}) ->
     ?LET({Key, Bucket}, gen_key_in_bucket(PK),
          [Pid, Bucket, Key, case Tag of ?STD_TAG -> default(none, Tag); _ -> Tag end]).
@@ -279,11 +232,6 @@ get_pre(#{leveled := Leveled}, [Pid, _Bucket, _Key, _Tag]) ->
 get_adapt(#{leveled := Leveled}, [_, Bucket, Key, Tag]) ->    
     [Leveled, Bucket, Key, Tag].
 
-%% @doc get_post - Postcondition for get
--spec get_post(S, Args, Res) -> true | term()
-    when S    :: eqc_state:dynamic_state(),
-         Args :: [term()],
-         Res  :: term().
 get_post(#{model := Model} = S, [_Pid, Bucket, Key, Tag], Res) ->
     ?CMD_VALID(S, get,
                case Res of
@@ -296,11 +244,6 @@ get_post(#{model := Model} = S, [_Pid, Bucket, Key, Tag], Res) ->
                end,
                eq(Res, {unsupported_message, get})).
 
-%% @doc get_features - Collects a list of features of this call with these arguments.
--spec get_features(S, Args, Res) -> list(any())
-    when S    :: eqc_statem:dynmic_state(),
-         Args :: [term()],
-         Res  :: term().
 get_features(#{deleted_keys := DK, previous_keys := PK}, [_Pid, Bucket, Key, _Tag], Res) ->
     case Res of
         not_found ->
@@ -313,11 +256,10 @@ get_features(#{deleted_keys := DK, previous_keys := PK}, [_Pid, Bucket, Key, _Ta
     end.
 
 %% --- Operation: mput ---
--spec mput_pre(S :: eqc_statem:symbolic_state()) -> boolean().
 mput_pre(S) ->
     is_leveled_open(S).
 
-%% @doc put_args - Argument generator
+%% @doc mput_args - Argument generator
 %% Specification says: duplicated should be removed
 %% "%% The list should be de-duplicated before it is passed to the bookie."
 %% Wether this means that keys should be unique or even Action and values is unclear.
@@ -336,11 +278,9 @@ mput_pre(#{leveled := Leveled}, [Pid, ObjSpecs]) ->
 mput_adapt(#{leveled := Leveled}, [_, ObjSpecs]) ->
     [ Leveled, no_key_dups(ObjSpecs) ].
 
-%% @doc put - The actual operation
 mput(Pid, ObjSpecs) ->
     leveled_bookie:book_mput(Pid, ObjSpecs).
 
-%% @doc put_next - Next state function
 mput_next(S, _, [_Pid, ObjSpecs]) ->
     ?CMD_VALID(S, mput,
                lists:foldl(fun({add, Bucket, Key, _SubKey, Value}, #{model := Model, previous_keys := PK} = Acc) ->
@@ -407,16 +347,10 @@ head_features(#{deleted_keys := DK, previous_keys := PK}, [_Pid, Bucket, Key, _T
     end.
 
 
-
-
 %% --- Operation: delete ---
-%% @doc delete_pre/1 - Precondition for generation
--spec delete_pre(S :: eqc_statem:symbolic_state()) -> boolean().
 delete_pre(S) ->
     is_leveled_open(S).
 
-%% @doc delete_args - Argument generator
--spec delete_args(S :: eqc_statem:symbolic_state()) -> eqc_gen:gen([term()]).
 delete_args(#{leveled := Pid, previous_keys := PK, tag := Tag}) ->
     ?LET({Key, Bucket}, gen_key_in_bucket(PK),
          [Pid, Bucket, Key, [], Tag]).
@@ -438,18 +372,11 @@ delete_adapt(#{leveled := Leveled, model := Model}, [_, Bucket, Key, Spec, Tag])
         end,
     [ Leveled, Bucket, Key, NewSpec, Tag ].
 
-%% @doc delete - The actual operation
 delete(Pid, Bucket, Key, Spec, ?STD_TAG) ->
     leveled_bookie:book_delete(Pid, Bucket, Key, Spec);
 delete(Pid, Bucket, Key, Spec, Tag) ->
     leveled_bookie:book_put(Pid, Bucket, Key, delete, Spec, Tag).
 
-%% @doc delete_next - Next state function
--spec delete_next(S, Var, Args) -> NewS
-    when S    :: eqc_statem:symbolic_state() | eqc_state:dynamic_state(),
-         Var  :: eqc_statem:var() | term(),
-         Args :: [term()],
-         NewS :: eqc_statem:symbolic_state() | eqc_state:dynamic_state().
 delete_next(#{model := Model, deleted_keys := DK} = S, _Value, [_Pid, Bucket, Key, _, _]) ->
     ?CMD_VALID(S, delete,
                S#{model => orddict:erase({Bucket, Key}, Model), 
@@ -464,11 +391,6 @@ delete_post(S, [_Pid, _Bucket, _Key, _, _], Res) ->
                    _ -> Res
                end).
 
-%% @doc delete_features - Collects a list of features of this call with these arguments.
--spec delete_features(S, Args, Res) -> list(any())
-    when S    :: eqc_statem:dynmic_state(),
-         Args :: [term()],
-         Res  :: term().
 delete_features(#{previous_keys := PK} = S, [_Pid, Bucket, Key, _, _], _Res) ->
     ?CMD_VALID(S, delete,
                case lists:member({Key, Bucket}, PK) of
@@ -523,14 +445,9 @@ is_empty_features(_S, [_Pid, _], Res) ->
     [{empty, Res}].
 
 %% --- Operation: drop ---
-%% @doc drop_pre/1 - Precondition for generation
--spec drop_pre(S :: eqc_statem:symbolic_state()) -> boolean().
 drop_pre(S) ->
     is_leveled_open(S).
 
-%% @doc drop_args - Argument generator
-%% Generate start options used when restarting
--spec drop_args(S :: eqc_statem:symbolic_state()) -> eqc_gen:gen([term()]).
 drop_args(#{leveled := Pid, dir := Dir} = S) ->
     ?LET([Tag, _], init_backend_args(S),
          [Pid, Tag, [{root_path, Dir} | gen_opts()]]).
@@ -553,35 +470,29 @@ drop(Pid, Tag, Opts) ->
             {still_alive, Pid}
     end.
 
-%% @doc drop_next - Next state function
--spec drop_next(S, Var, Args) -> NewS
-    when S    :: eqc_statem:symbolic_state() | eqc_state:dynamic_state(),
-         Var  :: eqc_statem:var() | term(),
-         Args :: [term()],
-         NewS :: eqc_statem:symbolic_state() | eqc_state:dynamic_state().
-drop_next(S, Value, [Pid, Tag, Opts]) ->
+drop_next(S, Value, [Pid, Tag, Opts, Name]) ->
     S1 = stop_next(S, Value, [Pid]),
     init_backend_next(S1#{model => orddict:new()}, 
-                      Value, [Tag, Opts]).
+                      Value, [Tag, Opts, Name]).
 
-%% @doc drop_post - Postcondition for drop
--spec drop_post(S, Args, Res) -> true | term()
-    when S    :: eqc_state:dynamic_state(),
-         Args :: [term()],
-         Res  :: term().
-drop_post(_S, [_Pid, _Tag, _Opts], NewPid) ->
-    case is_pid(NewPid) of
+drop_post(_S, [_Pid, _Tag, _Opts, _], Res) ->
+    case is_pid(Res) of
         true  -> true;
-        false -> NewPid
+        false -> Res
     end.
 
-drop_features(#{model := Model}, [_Pid, _Tag, _Opts], _Res) ->
+drop_features(#{model := Model}, [_Pid, _Tag, _Opts, _], _Res) ->
     Size = orddict:size(Model),
-    [{drop, empty} || Size == 0 ] ++ [{drop, Size div 10} || Size > 0 ].
+    [{drop, empty} || Size == 0 ] ++ 
+        [{drop, small} || Size > 0 andalso Size < 20 ] ++
+        [{drop, medium} || Size >= 20 andalso Size < 1000 ] ++
+        [{drop, large} || Size >= 1000 ].
 
 
 
 %% --- Operation: kill ---
+%% Test that killing the root Pid of leveled has the same effect as closing it nicely
+%% that means, we don't loose data! Not even when parallel successful puts are going on.
 kill_pre(S) ->
     is_leveled_open(S).
 
@@ -972,7 +883,7 @@ prop_db() ->
                            ],
             StartOptionFeatures = [ lists:keydelete(root_path, 1, Feature) || {start_options, Feature} <- call_features(history(RunResult)) ],
 
-            case whereis(sut) of
+            case whereis(maps:get(sut, initial_state())) of
                 undefined -> delete_level_data(Dir);
                 Pid when is_pid(Pid) ->
                     leveled_bookie:book_destroy(Pid)
