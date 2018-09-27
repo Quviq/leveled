@@ -90,7 +90,7 @@ init_backend_pre(S, [Tag, Options, _]) ->
         PreviousOptions == undefined orelse PreviousOptions == Options.
 
 init_backend_adapt(S, [Tag, Options, Name]) ->
-    {call, ?MODULE, init_backend, [ maps:get(tag, S, Tag), maps:get(start_opts, S, Options), Name]}.
+    [ maps:get(tag, S, Tag), maps:get(start_opts, S, Options), Name].
 
 %% @doc init_backend - The actual operation
 %% Start the database and read data from disk
@@ -449,25 +449,25 @@ drop_pre(S) ->
     is_leveled_open(S).
 
 drop_args(#{leveled := Pid, dir := Dir} = S) ->
-    ?LET([Tag, _], init_backend_args(S),
-         [Pid, Tag, [{root_path, Dir} | gen_opts()]]).
+    ?LET([Tag, _, Name], init_backend_args(S),
+         [Pid, Tag, [{root_path, Dir} | gen_opts()], Name]).
 
-drop_pre(#{leveled := Leveled}, [Pid, _Tag, _Opts]) ->
-    Pid == Leveled.
+drop_pre(#{leveled := Leveled} = S, [Pid, Tag, Opts, Name]) ->
+    Pid == Leveled andalso init_backend_pre(S, [Tag, Opts, Name]).
 
-drop_adapt(#{leveled := Leveled}, [_Pid, Tag, Opts]) ->
-    [Leveled, Tag, Opts].
+drop_adapt(#{leveled := Leveled} = S, [_Pid, Tag, Opts, Name]) ->
+    [Leveled | init_backend_adapt(S, [Tag, Opts, Name])].
     
 %% @doc drop - The actual operation
 %% Remove fles from disk (directory structure may remain) and start a new clean database
-drop(Pid, Tag, Opts) ->
+drop(Pid, Tag, Opts, Name) ->
     Mon = erlang:monitor(process, Pid),
     ok = leveled_bookie:book_destroy(Pid),
     receive
         {'DOWN', Mon, _Type, Pid, _Info} ->
-            init_backend(Tag, Opts)
+            init_backend(Tag, Opts, Name)
     after 5000 ->
-            {still_alive, Pid}
+            {still_alive, Pid, Name}
     end.
 
 drop_next(S, Value, [Pid, Tag, Opts, Name]) ->
