@@ -126,7 +126,7 @@ stop_pre(#{leveled := Leveled}, [Pid]) ->
     Pid == Leveled.
 
 stop_adapt(#{leveled := Leveled}, [_]) ->
-     {call, ?MODULE, stop, [Leveled]}.
+    [Leveled].
 
 %% @doc stop - The actual operation
 %% Stop the server, but the values are still on disk
@@ -168,7 +168,7 @@ put_pre(#{leveled := Leveled}, [Pid, _Bucket, _Key, _Value, _, _]) ->
     Pid == Leveled.
 
 put_adapt(#{leveled := Leveled}, [_, Bucket, Key, Value, Spec, Tag]) ->
-    {call, ?MODULE, put, [ Leveled, Bucket, Key, Value, Spec, Tag ]}.
+    [ Leveled, Bucket, Key, Value, Spec, Tag ].
 
 %% @doc put - The actual operation
 put(Pid, Bucket, Key, Value, Spec, none) ->
@@ -230,7 +230,7 @@ get_pre(#{leveled := Leveled}, [Pid, _Bucket, _Key, _Tag]) ->
     Pid == Leveled.
 
 get_adapt(#{leveled := Leveled}, [_, Bucket, Key, Tag]) ->    
-    {call, ?MODULE, get, [Leveled, Bucket, Key, Tag]}.
+    [Leveled, Bucket, Key, Tag].
 
 get_post(#{model := Model} = S, [_Pid, Bucket, Key, Tag], Res) ->
     ?CMD_VALID(S, get,
@@ -276,7 +276,7 @@ mput_pre(#{leveled := Leveled}, [Pid, ObjSpecs]) ->
     Pid == Leveled andalso no_key_dups(ObjSpecs) == ObjSpecs.
 
 mput_adapt(#{leveled := Leveled}, [_, ObjSpecs]) ->
-    {call, ?MODULE, mput, [ Leveled, no_key_dups(ObjSpecs) ]}.
+    [ Leveled, no_key_dups(ObjSpecs) ].
 
 mput(Pid, ObjSpecs) ->
     leveled_bookie:book_mput(Pid, ObjSpecs).
@@ -311,7 +311,7 @@ head_pre(#{leveled := Leveled}, [Pid, _Bucket, _Key, _Tag]) ->
     Pid == Leveled.
 
 head_adapt(#{leveled := Leveled}, [_, Bucket, Key, Tag]) ->    
-    {call, ?MODULE, head, [Leveled, Bucket, Key, Tag]}.
+    [Leveled, Bucket, Key, Tag].
 
 head(Pid, Bucket, Key, none) ->
     leveled_bookie:book_head(Pid, Bucket, Key);
@@ -370,7 +370,7 @@ delete_adapt(#{leveled := Leveled, model := Model}, [_, Bucket, Key, Spec, Tag])
             {ok, {_, OldSpec}} ->
                 Spec == OldSpec
         end,
-    {call, ?MODULE, delete, [ Leveled, Bucket, Key, NewSpec, Tag ]}.
+    [ Leveled, Bucket, Key, NewSpec, Tag ].
 
 delete(Pid, Bucket, Key, Spec, ?STD_TAG) ->
     leveled_bookie:book_delete(Pid, Bucket, Key, Spec);
@@ -417,7 +417,7 @@ is_empty_pre(#{leveled := Leveled}, [Pid, _]) ->
     Pid == Leveled.
 
 is_empty_adapt(#{leveled := Leveled}, [_, Tag]) ->
-    {call, ?MODULE, delete, [Leveled, Tag]}.
+    [Leveled, Tag].
 
 %% @doc is_empty - The actual operation
 is_empty(Pid, Tag) ->
@@ -449,24 +449,25 @@ drop_pre(S) ->
     is_leveled_open(S).
 
 drop_args(#{leveled := Pid, dir := Dir} = S) ->
-    ?LET([Tag, _, Name], init_backend_args(S),
-         [Pid, Tag, [{root_path, Dir} | gen_opts()], Name]).
+    ?LET([Tag, _], init_backend_args(S),
+         [Pid, Tag, [{root_path, Dir} | gen_opts()]]).
 
-drop_pre(#{leveled := Leveled}, [Pid, _Tag, _Opts, _]) ->
+drop_pre(#{leveled := Leveled}, [Pid, _Tag, _Opts]) ->
     Pid == Leveled.
 
-drop_adapt(#{leveled := Leveled}, [_Pid, Tag, Opts, Name]) ->
-    {call, ?MODULE, drop, [Leveled, Tag, Opts, Name]}.
+drop_adapt(#{leveled := Leveled}, [_Pid, Tag, Opts]) ->
+    [Leveled, Tag, Opts].
     
-%% Remove files from disk (directory structure may remain) and start a new clean database
-drop(Pid, Tag, Opts, Name) ->
+%% @doc drop - The actual operation
+%% Remove fles from disk (directory structure may remain) and start a new clean database
+drop(Pid, Tag, Opts) ->
     Mon = erlang:monitor(process, Pid),
     ok = leveled_bookie:book_destroy(Pid),
     receive
         {'DOWN', Mon, _Type, Pid, _Info} ->
-            init_backend(Tag, Opts, Name)
+            init_backend(Tag, Opts)
     after 5000 ->
-            {still_alive, Pid, Name}
+            {still_alive, Pid}
     end.
 
 drop_next(S, Value, [Pid, Tag, Opts, Name]) ->
@@ -474,19 +475,24 @@ drop_next(S, Value, [Pid, Tag, Opts, Name]) ->
     init_backend_next(S1#{model => orddict:new()}, 
                       Value, [Tag, Opts, Name]).
 
-drop_post(_S, [_Pid, _Tag, _Opts, _], NewPid) ->
-    case is_pid(NewPid) of
+drop_post(_S, [_Pid, _Tag, _Opts, _], Res) ->
+    case is_pid(Res) of
         true  -> true;
-        false -> NewPid
+        false -> Res
     end.
 
 drop_features(#{model := Model}, [_Pid, _Tag, _Opts, _], _Res) ->
     Size = orddict:size(Model),
-    [{drop, empty} || Size == 0 ] ++ [{drop, Size div 10} || Size > 0 ].
+    [{drop, empty} || Size == 0 ] ++ 
+        [{drop, small} || Size > 0 andalso Size < 20 ] ++
+        [{drop, medium} || Size >= 20 andalso Size < 1000 ] ++
+        [{drop, large} || Size >= 1000 ].
 
 
 
 %% --- Operation: kill ---
+%% Test that killing the root Pid of leveled has the same effect as closing it nicely
+%% that means, we don't loose data! Not even when parallel successful puts are going on.
 kill_pre(S) ->
     is_leveled_open(S).
 
@@ -497,7 +503,7 @@ kill_pre(#{leveled := Leveled}, [Pid]) ->
     Pid == Leveled.
 
 kill_adapt(#{leveled := Leveled}, [_]) ->
-    {call, ?MODULE, kill, [ Leveled ]}.
+    [ Leveled ].
 
 kill(Pid) ->
     exit(Pid, kill),
@@ -530,7 +536,7 @@ indexfold_pre(#{leveled := Leveled}, [Pid, _Constraint, _FoldAccT, _Range, _Term
     
 indexfold_adapt(#{leveled := Leveled}, [_, Constraint, FoldAccT, Range, TermHandling, Counter]) ->
     %% Keep the counter!
-    {call, ?MODULE, indexfold, [Leveled, Constraint, FoldAccT, Range, TermHandling, Counter]}.
+    [Leveled, Constraint, FoldAccT, Range, TermHandling, Counter].
 
 indexfold(Pid, Constraint, FoldAccT, Range, {_, undefined} = TermHandling, _Counter) ->
     {async, Folder} = leveled_bookie:book_indexfold(Pid, Constraint, FoldAccT, Range, TermHandling),
@@ -609,7 +615,7 @@ keylistfold_pre(#{leveled := Leveled}, [Pid, _Tag, _FoldAccT, _Counter]) ->
     
 keylistfold_adapt(#{leveled := Leveled}, [_, Tag, FoldAccT, Counter]) ->
     %% Keep the counter!
-    {call, ?MODULE, keylistfold, [Leveled, Tag, FoldAccT, Counter]}.
+    [Leveled, Tag, FoldAccT, Counter].
 
 keylistfold(Pid, Tag, FoldAccT, _Counter) ->
     {async, Folder} = leveled_bookie:book_keylist(Pid, Tag, FoldAccT),
@@ -645,7 +651,7 @@ bucketlistfold_pre(#{leveled := Leveled}, [Pid, _Tag, _FoldAccT, _Constraints, _
      Pid == Leveled.
 
 bucketlistfold_adapt(#{leveled := Leveled}, [_Pid, Tag, FoldAccT, Constraints, Counter]) ->
-    {call, ?MODULE, bucketlistfold, [Leveled, Tag, FoldAccT, Constraints, Counter]}.
+    [Leveled, Tag, FoldAccT, Constraints, Counter].
 
 bucketlistfold(Pid, Tag, FoldAccT, Constraints, _) ->
     {async, Folder} = leveled_bookie:book_bucketlist(Pid, Tag, FoldAccT, Constraints),
@@ -690,7 +696,7 @@ objectfold_pre(#{leveled := Leveled}, [Pid, _Tag, _FoldAccT, _Snapshot, _Counter
     Leveled == Pid.
 
 objectfold_adapt(#{leveled := Leveled}, [_Pid, Tag, FoldAccT, Snapshot, Counter]) ->
-    {call, ?MODULE, objectfold, [Leveled, Tag, FoldAccT, Snapshot, Counter]}.
+    [Leveled, Tag, FoldAccT, Snapshot, Counter].
 
 objectfold(Pid, Tag, FoldAccT, Snapshot, _Counter) ->
     {async, Folder} = leveled_bookie:book_objectfold(Pid, Tag, FoldAccT, Snapshot),
