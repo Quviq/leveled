@@ -38,8 +38,6 @@
         end).
                        
 
--type state() :: map().
-
 eqc_test_() ->
     Timeout = 50,
     {timeout, max(2 * Timeout, Timeout + 10),
@@ -90,7 +88,7 @@ init_backend_pre(S, [Tag, Options, _]) ->
         PreviousOptions == undefined orelse PreviousOptions == Options.
 
 init_backend_adapt(S, [Tag, Options, Name]) ->
-    {call, ?MODULE, init_backend, [ maps:get(tag, S, Tag), maps:get(start_opts, S, Options), Name]}.
+    [ maps:get(tag, S, Tag), maps:get(start_opts, S, Options), Name].
 
 %% @doc init_backend - The actual operation
 %% Start the database and read data from disk
@@ -402,13 +400,9 @@ delete_features(#{previous_keys := PK} = S, [_Pid, Bucket, Key, _, _], _Res) ->
                [{delete, unsupported}]).
 
 %% --- Operation: is_empty ---
-%% @doc is_empty_pre/1 - Precondition for generation
--spec is_empty_pre(S :: eqc_statem:symbolic_state()) -> boolean().
 is_empty_pre(S) ->
     is_leveled_open(S).
 
-%% @doc is_empty_args - Argument generator
--spec is_empty_args(S :: eqc_statem:symbolic_state()) -> eqc_gen:gen([term()]).
 is_empty_args(#{leveled := Pid, tag := Tag}) ->
     [Pid, Tag].
 
@@ -423,11 +417,6 @@ is_empty_adapt(#{leveled := Leveled}, [_, Tag]) ->
 is_empty(Pid, Tag) ->
     leveled_bookie:book_isempty(Pid, Tag).
 
-%% @doc is_empty_post - Postcondition for is_empty
--spec is_empty_post(S, Args, Res) -> true | term()
-    when S    :: eqc_state:dynamic_state(),
-         Args :: [term()],
-         Res  :: term().
 is_empty_post(#{model := Model}, [_Pid, _Tag], Res) ->
     Size = orddict:size(Model),
     case Res of
@@ -436,11 +425,6 @@ is_empty_post(#{model := Model}, [_Pid, _Tag], Res) ->
         false when Size > 0  -> true
     end.
 
-%% @doc is_empty_features - Collects a list of features of this call with these arguments.
--spec is_empty_features(S, Args, Res) -> list(any())
-    when S    :: eqc_statem:dynmic_state(),
-         Args :: [term()],
-         Res  :: term().
 is_empty_features(_S, [_Pid, _], Res) ->
     [{empty, Res}].
 
@@ -449,25 +433,25 @@ drop_pre(S) ->
     is_leveled_open(S).
 
 drop_args(#{leveled := Pid, dir := Dir} = S) ->
-    ?LET([Tag, _], init_backend_args(S),
-         [Pid, Tag, [{root_path, Dir} | gen_opts()]]).
+    ?LET([Tag, _, Name], init_backend_args(S),
+         [Pid, Tag, [{root_path, Dir} | gen_opts()], Name]).
 
-drop_pre(#{leveled := Leveled}, [Pid, _Tag, _Opts]) ->
-    Pid == Leveled.
+drop_pre(#{leveled := Leveled} = S, [Pid, Tag, Opts, Name]) ->
+    Pid == Leveled andalso init_backend_pre(S, [Tag, Opts, Name]).
 
-drop_adapt(#{leveled := Leveled}, [_Pid, Tag, Opts]) ->
-    [Leveled, Tag, Opts].
+drop_adapt(#{leveled := Leveled} = S, [_Pid, Tag, Opts, Name]) ->
+    [Leveled | init_backend_adapt(S, [Tag, Opts, Name])].
     
 %% @doc drop - The actual operation
 %% Remove fles from disk (directory structure may remain) and start a new clean database
-drop(Pid, Tag, Opts) ->
+drop(Pid, Tag, Opts, Name) ->
     Mon = erlang:monitor(process, Pid),
     ok = leveled_bookie:book_destroy(Pid),
     receive
         {'DOWN', Mon, _Type, Pid, _Info} ->
-            init_backend(Tag, Opts)
+            init_backend(Tag, Opts, Name)
     after 5000 ->
-            {still_alive, Pid}
+            {still_alive, Pid, Name}
     end.
 
 drop_next(S, Value, [Pid, Tag, Opts, Name]) ->
@@ -1050,7 +1034,6 @@ get_foldobj([_ | Rest], Counter) ->
 %% Helper for all those preconditions that just check that leveled Pid
 %% is populated in state. (We cannot check with is_pid, since that's
 %% symbolic in test case generation!).
--spec is_leveled_open(state()) -> boolean().
 is_leveled_open(S) ->
     maps:get(leveled, S, undefined) =/= undefined.
 
