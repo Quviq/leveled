@@ -38,8 +38,6 @@
         end).
                        
 
--type state() :: map().
-
 eqc_test_() ->
     Timeout = 50,
     {timeout, max(2 * Timeout, Timeout + 10),
@@ -95,13 +93,30 @@ init_backend_adapt(S, [Tag, Options, Name]) ->
 %% @doc init_backend - The actual operation
 %% Start the database and read data from disk
 init_backend(_Tag, Options, Name) ->
-    case leveled_bookie:book_start(Options) of
-        {ok, Bookie} ->
-            unlink(Bookie),
-            erlang:register(Name, Bookie),
-            Bookie;
-        Error -> Error
+    %% case leveled_bookie:book_start(Options) of
+    %%     {ok, Bookie} ->
+    %%         unlink(Bookie),
+    %%         erlang:register(Name, Bookie),
+    %%         Bookie;
+    %%     Error -> Error
+    %% end.
+    Self = self(),
+    spawn(fun() ->
+                  Self ! 
+                      {init_backend, case leveled_bookie:book_start(Options) of
+                          {ok, Bookie} ->
+                              unlink(Bookie),
+                              erlang:register(Name, Bookie),
+                              Bookie;
+                          Error -> Error
+                      end}
+          end),
+    receive
+        {init_backend, X} -> X
+    after 1000 ->
+            error
     end.
+             
 
 init_backend_next(S, LevelEdPid, [Tag, Options, _]) ->
     S#{leveled => LevelEdPid, start_opts => Options, tag => Tag}.
@@ -945,12 +960,13 @@ show_function(F) ->
 
 
 %% slack discussion:
-%% `max_journalsize` should be at least 2048 + byte_size(smallest_object) + byte_size(smallest_object's key) + overhead (which is a few bytes per K/V pair).
+%% `max_journalsize` should be at least 2048 + byte_size(smallest_object) + byte_size(smallest_object's key) + 
+%%       overhead (which is a few bytes per K/V pair).
 gen_opts() ->
     options([%% {head_only, elements([false, no_lookup, with_lookup])} we don't test head_only mode
               {compression_method, elements([native, lz4])}
             , {compression_point, elements([on_compact, on_receipt])}
-            %% , {max_journalsize, ?LET(N, nat(), 2048 + 1000 + 32 + 16 + 16 + N)}
+            , {max_journalsize, elements([10, 1000])} %%, 2000, 3000])}
             , {cache_size, oneof([nat(), 2048, 2060, 5000])}
             ]).
 

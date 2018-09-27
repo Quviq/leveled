@@ -381,7 +381,8 @@ log(LogRef, Subs, SupportedLogLevels) ->
                     io:format(format_time()
                                 ++ " " ++ LogRef ++ " ~w "
                                 ++ LogText ++ "~n",
-                                [self()|Subs]);
+                                [self()|Subs]),
+                       error(log);
                 false ->
                     ok
             end;
