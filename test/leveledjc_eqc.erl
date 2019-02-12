@@ -825,20 +825,24 @@ objectfold_pre(S) ->
     is_leveled_open(S).
 
 objectfold_args(#{leveled := Pid, counter := Counter, tag := Tag}) ->
-    [Pid, Tag, gen_foldacc(4), bool(), Counter].
+    [Pid, Tag, gen_foldacc(4), bool(), elements([key_order, %% sqn_order,
+                                                 none]), Counter].
 
-objectfold_pre(#{leveled := Leveled}, [Pid, _Tag, _FoldAccT, _Snapshot, _Counter]) ->
+objectfold_pre(#{leveled := Leveled}, [Pid, _Tag, _FoldAccT, _Snapshot, _Order, _Counter]) ->
     Leveled == Pid.
 
-objectfold_adapt(#{leveled := Leveled}, [_Pid, Tag, FoldAccT, Snapshot, Counter]) ->
-    [Leveled, Tag, FoldAccT, Snapshot, Counter].
+objectfold_adapt(#{leveled := Leveled}, [_Pid, Tag, FoldAccT, Snapshot, Order, Counter]) ->
+    [Leveled, Tag, FoldAccT, Snapshot, Order, Counter].
 
-objectfold(Pid, Tag, FoldAccT, Snapshot, _Counter) ->
+objectfold(Pid, Tag, FoldAccT, Snapshot, none, _Counter) ->
     {async, Folder} = leveled_bookie:book_objectfold(Pid, Tag, FoldAccT, Snapshot),
+    Folder;
+objectfold(Pid, Tag, FoldAccT, Snapshot, Order, _Counter) ->
+    {async, Folder} = leveled_bookie:book_objectfold(Pid, Tag, FoldAccT, Snapshot, Order),
     Folder.
 
 objectfold_next(#{folders := Folders, model := Model} = S, SymFolder, 
-                [_Pid, _Tag, {Fun, Acc}, Snapshot, Counter]) ->
+                [_Pid, _Tag, {Fun, Acc}, Snapshot, _Order, Counter]) ->
     S#{folders => 
            Folders ++ 
            [#{counter => Counter,
@@ -857,11 +861,11 @@ objectfold_next(#{folders := Folders, model := Model} = S, SymFolder,
              }],
        counter => Counter + 1}.
 
-objectfold_post(_S, [_Pid, _Tag, _FoldAccT, _Snapshot, _Counter], Res) ->
+objectfold_post(_S, [_Pid, _Tag, _FoldAccT, _Snapshot, _Order, _Counter], Res) ->
     is_function(Res).
 
-objectfold_features(_S, [_Pid, _Tag, FoldAccT, _Snapshot, _Counter], _Res) ->
-    [{foldAccT, FoldAccT}]. %% This will be extracted for printing later
+objectfold_features(_S, [_Pid, _Tag, FoldAccT, _Snapshot, Order, _Counter], _Res) ->
+    [{foldAccT, FoldAccT}, {objectfold, Order}]. %% This will be extracted for printing later
 
 
 
