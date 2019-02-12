@@ -62,7 +62,7 @@ initial_state() ->
       sut => sut,
       leveled => undefined,   %% to make adapt happy after failing pre/1
       counter => 0,
-      model => orddict:new(),
+      model => [],
       previous_keys => [],
       deleted_keys => [],
       folders => []
@@ -196,12 +196,12 @@ updateload_next(#{model := Model} = S, _V, [_Pid, Bucket, Key, _Value, Obj, Spec
     ?CMD_VALID(S, put,
                begin
                    NewSpec = 
-                       case orddict:find({Bucket, Key}, Model) of
+                       case model_find({Bucket, Key}, Model) of
                            error -> merge_index_spec([], Spec);
                            {ok, {_, OldSpec}} ->
                                merge_index_spec(OldSpec, Spec)
                        end,
-                   S#{model => orddict:store({Bucket, Key}, {Obj, NewSpec}, Model)}
+                   S#{model => model_store({Bucket, Key}, {Obj, NewSpec}, Model)}
                end,
                S).
 
@@ -251,12 +251,12 @@ put_next(#{model := Model, previous_keys := PK} = S, _Value, [_Pid, Bucket, Key,
     ?CMD_VALID(S, put,
                begin
                    NewSpec = 
-                       case orddict:find({Bucket, Key}, Model) of
+                       case model_find({Bucket, Key}, Model) of
                            error -> merge_index_spec([], Spec);
                            {ok, {_, OldSpec}} ->
                                merge_index_spec(OldSpec, Spec)
                        end,
-                   S#{model => orddict:store({Bucket, Key}, {Value, NewSpec}, Model),
+                   S#{model => model_store({Bucket, Key}, {Value, NewSpec}, Model),
                       previous_keys => PK ++ [{Key, Bucket}]}
                end,
                S).
@@ -307,11 +307,11 @@ get_post(#{model := Model} = S, [_Pid, Bucket, Key, Tag], Res) ->
     ?CMD_VALID(S, get,
                case Res of
                    {ok, _} ->
-                       {ok, {Value, _}} = orddict:find({Bucket, Key}, Model),
+                       {ok, {Value, _}} = model_find({Bucket, Key}, Model),
                        eq(Res, {ok, Value});
                    not_found ->
                        %% Weird to be able to supply a tag, but must be STD_TAG...
-                       Tag =/= ?STD_TAG orelse orddict:find({Bucket, Key}, Model) == error
+                       Tag =/= ?STD_TAG orelse model_find({Bucket, Key}, Model) == error
                end,
                eq(Res, {unsupported_message, get})).
 
@@ -355,10 +355,10 @@ mput(Pid, ObjSpecs) ->
 mput_next(S, _, [_Pid, ObjSpecs]) ->
     ?CMD_VALID(S, mput,
                lists:foldl(fun({add, Bucket, Key, _SubKey, Value}, #{model := Model, previous_keys := PK} = Acc) ->
-                                   Acc#{model => orddict:store({Bucket, Key}, {Value, []}, Model),
+                                   Acc#{model => model_store({Bucket, Key}, {Value, []}, Model),
                                         previous_keys => PK ++ [{Key, Bucket}]};
                               ({remove, Bucket, Key, _SubKey, _Value}, #{model := Model} = Acc) ->
-                                   Acc#{model => orddict:erase({Bucket, Key}, Model)}
+                                   Acc#{model => model_erase({Bucket, Key}, Model)}
                            end, S, ObjSpecs),
                S).
 
@@ -393,12 +393,12 @@ head_post(#{model := Model} = S, [_Pid, Bucket, Key, Tag], Res) ->
     ?CMD_VALID(S, head,
                case Res of
                    {ok, _MetaData} ->
-                       orddict:find({Bucket, Key}, Model) =/= error;
+                       model_find({Bucket, Key}, Model) =/= error;
                    not_found ->
                        %% Weird to be able to supply a tag, but must be STD_TAG...
                        implies(lists:member(maps:get(start_opts, S), [{head_only, with_lookup}]), 
                                lists:member(Tag, [?STD_TAG, none, ?HEAD_TAG])) orelse 
-                       orddict:find({Bucket, Key}, Model) == error;
+                       model_find({Bucket, Key}, Model) == error;
                    {unsupported_message, head} ->
                        Tag =/= ?HEAD_TAG
                end,
@@ -428,7 +428,7 @@ delete_args(#{leveled := Pid, previous_keys := PK, tag := Tag}) ->
 
 delete_pre(#{leveled := Leveled, model := Model}, [Pid, Bucket, Key, Spec, _Tag]) ->
     Pid == Leveled andalso
-        case orddict:find({Bucket, Key}, Model) of
+        case model_find({Bucket, Key}, Model) of
             error -> true;
             {ok, {_, OldSpec}} ->
                 Spec == OldSpec
@@ -436,7 +436,7 @@ delete_pre(#{leveled := Leveled, model := Model}, [Pid, Bucket, Key, Spec, _Tag]
 
 delete_adapt(#{leveled := Leveled, model := Model}, [_, Bucket, Key, Spec, Tag]) ->
     NewSpec = 
-        case orddict:find({Bucket, Key}, Model) of
+        case model_find({Bucket, Key}, Model) of
             error -> Spec;
             {ok, {_, OldSpec}} ->
                 Spec == OldSpec
@@ -450,8 +450,8 @@ delete(Pid, Bucket, Key, Spec, Tag) ->
 
 delete_next(#{model := Model, deleted_keys := DK} = S, _Value, [_Pid, Bucket, Key, _, _]) ->
     ?CMD_VALID(S, delete,
-               S#{model => orddict:erase({Bucket, Key}, Model), 
-                  deleted_keys => DK ++ [{Key, Bucket} || orddict:is_key({Key, Bucket}, Model)]},
+               S#{model => model_erase({Bucket, Key}, Model), 
+                  deleted_keys => DK ++ [{Key, Bucket} || model_is_key({Key, Bucket}, Model)]},
                S).
 
 delete_post(S, [_Pid, _Bucket, _Key, _, _], Res) ->
@@ -491,7 +491,7 @@ is_empty(Pid, Tag) ->
     leveled_bookie:book_isempty(Pid, Tag).
 
 is_empty_post(#{model := Model}, [_Pid, _Tag], Res) ->
-    Size = orddict:size(Model),
+    Size = length(Model),
     case Res of
         true -> eq(0, Size);
         false when Size == 0 -> expected_empty;
@@ -529,7 +529,7 @@ drop(Pid, Tag, Opts, Name) ->
 
 drop_next(S, Value, [Pid, Tag, Opts, Name]) ->
     S1 = stop_next(S, Value, [Pid]),
-    init_backend_next(S1#{model => orddict:new()}, 
+    init_backend_next(S1#{model => []}, 
                       Value, [Tag, Opts, Name]).
 
 drop_post(_S, [_Pid, _Tag, _Opts, _], Res) ->
@@ -539,7 +539,7 @@ drop_post(_S, [_Pid, _Tag, _Opts, _], Res) ->
     end.
 
 drop_features(#{model := Model}, [_Pid, _Tag, _Opts, _], _Res) ->
-    Size = orddict:size(Model),
+    Size = length(Model),
     [{drop, empty} || Size == 0 ] ++ 
         [{drop, small} || Size > 0 andalso Size < 20 ] ++
         [{drop, medium} || Size >= 20 andalso Size < 1000 ] ++
@@ -700,7 +700,7 @@ indexfold_next(#{folders := Folders} = S, SymFolder,
               result => fun(Model) ->
                                 Select = 
                                     lists:sort(
-                                      orddict:fold(fun({B, K}, {_V, Spec}, A) ->
+                                      model_fold(fun({B, K}, {_V, Spec}, A) ->
                                                            [ {B, {Idx, K}}
                                                              || {Cat, Idx} <- Spec,
                                                                 Idx >= From, Idx =< To,
@@ -764,7 +764,7 @@ keylistfold_next(#{folders := Folders, model := Model} = S, SymFolder,
               type => keylist,
               folder => SymFolder,
               reusable => false,
-              result => fun(_) -> orddict:fold(fun({B, K}, _V, A) -> Fun(B, K, A) end, Acc, Model) end
+              result => fun(_) -> model_fold(fun({B, K}, _V, A) -> Fun(B, K, A) end, Acc, Model) end
              }],
        counter => Counter + 1}.
 
@@ -801,7 +801,7 @@ bucketlistfold_next(#{folders := Folders} = S, SymFolder,
               folder => SymFolder, 
               reusable => true,
               result => fun(Model) ->
-                                Bs = orddict:fold(fun({B, _K}, _V, A) -> A ++ [B || not lists:member(B, A)] end, [], Model),
+                                Bs = model_fold(fun({B, _K}, _V, A) -> A ++ [B || not lists:member(B, A)] end, [], Model),
                                 case {Constraints, Bs} of
                                     {all, _} ->
                                         lists:foldl(fun(B, A) -> Fun(B, A) end, Acc, Bs);
@@ -855,7 +855,7 @@ objectfold_next(#{folders := Folders, model := Model} = S, SymFolder,
                                         true -> Model;
                                         false -> M
                                     end,
-                                Objs = orddict:fold(fun({B, K}, {V, _}, A) -> [{B, K, V} | A] end, [], OnModel),
+                                Objs = model_fold(fun({B, K}, {V, _}, A) -> [{B, K, V} | A] end, [], OnModel),
                                 lists:foldr(fun({B, K, V}, A) -> Fun(B, K, V, A) end, Acc, Objs)
                         end
              }],
@@ -1290,3 +1290,22 @@ no_key_dups([]) ->
 no_key_dups([{_Action, Bucket, Key, SubKey, _Value} = E | Es]) ->
     [E | no_key_dups([ {A, B, K, SK, V} || {A, B, K, SK, V} <- Es,
                                            {B, K, SK} =/= {Bucket, Key, SubKey}])].
+
+model_find({Bucket, Key}, Model) ->
+    case lists:keyfind({Bucket, Key}, 1, Model) of
+        false -> error;
+        {_, Value} -> {ok, Value}
+    end.
+
+model_store({Bucket, Key}, {Obj, NewSpec}, Model) ->
+    %% Possibly need to do keyreplace instead to keep sequence order
+    model_erase({Bucket, Key}, Model) ++ [{{Bucket, Key}, {Obj, NewSpec}}].
+
+model_erase({Bucket, Key}, Model) ->
+    lists:keydelete({Bucket, Key}, 1, Model).
+
+model_is_key({Key, Bucket}, Model) ->
+    lists:keymember({Key, Bucket}, 1, Model).
+
+model_fold(Fun, Acc, Model) ->
+    orddict:fold(Fun, Acc, orddict:from_list(Model)).
