@@ -77,7 +77,8 @@ init_backend_args(#{dir := Dir, sut := Name} = S) ->
         undefined ->
             [ default(?RIAK_TAG, ?STD_TAG),  %% Just test one tag at a time
               [{root_path, Dir}, {log_level, error},
-                {max_sstslots, 2}, {cache_size, 10}, {max_pencillercachesize, 40}, {max_journalsize, 20000} | gen_opts()], Name ];
+                {max_sstslots, 2}, {cache_size, 10}, {max_pencillercachesize, 40}, {max_journalsize, 20000} 
+               | gen_opts()], Name ];
         Opts ->
             %% root_path is part of existing options
             [ maps:get(tag, S), Opts, Name ]
@@ -700,7 +701,7 @@ indexfold_next(#{folders := Folders} = S, SymFolder,
               result => fun(Model) ->
                                 Select = 
                                     lists:sort(
-                                      model_fold(fun({B, K}, {_V, Spec}, A) ->
+                                      model_fold(none, fun({B, K}, {_V, Spec}, A) ->
                                                            [ {B, {Idx, K}}
                                                              || {Cat, Idx} <- Spec,
                                                                 Idx >= From, Idx =< To,
@@ -764,7 +765,7 @@ keylistfold_next(#{folders := Folders, model := Model} = S, SymFolder,
               type => keylist,
               folder => SymFolder,
               reusable => false,
-              result => fun(_) -> model_fold(fun({B, K}, _V, A) -> Fun(B, K, A) end, Acc, Model) end
+              result => fun(_) -> model_fold(none, fun({B, K}, _V, A) -> Fun(B, K, A) end, Acc, Model) end
              }],
        counter => Counter + 1}.
 
@@ -801,7 +802,7 @@ bucketlistfold_next(#{folders := Folders} = S, SymFolder,
               folder => SymFolder, 
               reusable => true,
               result => fun(Model) ->
-                                Bs = model_fold(fun({B, _K}, _V, A) -> A ++ [B || not lists:member(B, A)] end, [], Model),
+                                Bs = model_fold(none, fun({B, _K}, _V, A) -> A ++ [B || not lists:member(B, A)] end, [], Model),
                                 case {Constraints, Bs} of
                                     {all, _} ->
                                         lists:foldl(fun(B, A) -> Fun(B, A) end, Acc, Bs);
@@ -825,8 +826,7 @@ objectfold_pre(S) ->
     is_leveled_open(S).
 
 objectfold_args(#{leveled := Pid, counter := Counter, tag := Tag}) ->
-    [Pid, Tag, gen_foldacc(4), bool(), elements([key_order, %% sqn_order,
-                                                 none]), Counter].
+    [Pid, Tag, gen_foldacc(4), bool(), elements([key_order, sqn_order, none]), Counter].
 
 objectfold_pre(#{leveled := Leveled}, [Pid, _Tag, _FoldAccT, _Snapshot, _Order, _Counter]) ->
     Leveled == Pid.
@@ -834,30 +834,45 @@ objectfold_pre(#{leveled := Leveled}, [Pid, _Tag, _FoldAccT, _Snapshot, _Order, 
 objectfold_adapt(#{leveled := Leveled}, [_Pid, Tag, FoldAccT, Snapshot, Order, Counter]) ->
     [Leveled, Tag, FoldAccT, Snapshot, Order, Counter].
 
-objectfold(Pid, Tag, FoldAccT, Snapshot, none, _Counter) ->
-    {async, Folder} = leveled_bookie:book_objectfold(Pid, Tag, FoldAccT, Snapshot),
-    Folder;
 objectfold(Pid, Tag, FoldAccT, Snapshot, Order, _Counter) ->
-    {async, Folder} = leveled_bookie:book_objectfold(Pid, Tag, FoldAccT, Snapshot, Order),
+    {async, Folder} = 
+        case Order of
+            none -> leveled_bookie:book_objectfold(Pid, Tag, FoldAccT, Snapshot);
+            _ -> leveled_bookie:book_objectfold(Pid, Tag, FoldAccT, Snapshot, Order)
+        end,
     Folder.
 
 objectfold_next(#{folders := Folders, model := Model} = S, SymFolder, 
-                [_Pid, _Tag, {Fun, Acc}, Snapshot, _Order, Counter]) ->
+                [_Pid, _Tag, {Fun, Acc}, Snapshot, Order, Counter]) ->
     S#{folders => 
            Folders ++ 
            [#{counter => Counter,
               type => objectfold,
               folder => SymFolder, 
               reusable => not Snapshot,
-              result => fun(M) ->
-                                OnModel =  
-                                    case Snapshot of
-                                        true -> Model;
-                                        false -> M
-                                    end,
-                                Objs = model_fold(fun({B, K}, {V, _}, A) -> [{B, K, V} | A] end, [], OnModel),
-                                lists:foldr(fun({B, K, V}, A) -> Fun(B, K, V, A) end, Acc, Objs)
-                        end
+              result =>
+                  case Order of
+                      sqn_order ->
+                          fun(M) ->
+                                  OnModel =  
+                                      case Snapshot of
+                                          true -> Model;
+                                          false -> M
+                                      end,
+                                  Objs = model_fold(sqn_order, fun({{B, K}, {V, _}}, A) -> [{B, K, V} | A] end, [], OnModel),
+                                  lists:foldr(fun({B, K, V}, A) -> Fun(B, K, V, A) end, Acc, Objs)
+                          end;
+                      _ ->
+                          fun(M) ->
+                                  OnModel =  
+                                      case Snapshot of
+                                          true -> Model;
+                                          false -> M
+                                      end,
+                                  Objs = model_fold(Order, fun({B, K}, {V, _}, A) -> [{B, K, V} | A] end, [], OnModel),
+                                  lists:foldr(fun({B, K, V}, A) -> Fun(B, K, V, A) end, Acc, Objs)
+                          end                      
+                  end
              }],
        counter => Counter + 1}.
 
@@ -980,6 +995,10 @@ weight(S, C) when C == get;
                   C == delete;
                   C == updateload ->
     ?CMD_VALID(S, put, 10, 1);
+weight(_S, objectfold) ->
+    10;
+weight(_S, fold_run) ->
+    10;
 weight(_S, stop) ->
     1;
 weight(_, _) ->
@@ -1307,5 +1326,9 @@ model_erase({Bucket, Key}, Model) ->
 model_is_key({Key, Bucket}, Model) ->
     lists:keymember({Key, Bucket}, 1, Model).
 
-model_fold(Fun, Acc, Model) ->
-    orddict:fold(Fun, Acc, orddict:from_list(Model)).
+
+model_fold(Order, Fun, Acc, Model) when Order == key_order; Order == none->
+    orddict:fold(Fun, Acc, orddict:from_list(Model));
+model_fold(sqn_order, Fun, Acc, Model) ->
+    lists:foldl(Fun, Acc, Model).
+
