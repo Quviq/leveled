@@ -153,8 +153,9 @@ stop_post(_S, [Pid], _Res) ->
 
 
 %% --- Operation: updateload ---
+%% Only do batch loading in sequential test cases, since this is not atomic with running a fold.
 updateload_pre(S) ->
-    is_leveled_open(S).
+    is_leveled_open(S) andalso maps:get(sequential, S, false).
 
 %% updateload for specific bucket (doesn't overlap with get/put/delete)
 updateload_args(#{leveled := Pid, tag := Tag}) ->
@@ -1025,9 +1026,9 @@ prop_db() ->
     Dir = "./leveled_data",
     eqc:dont_print_counterexample( 
     ?LET(Shrinking, parameter(shrinking, false),
-    ?FORALL({Kind, Cmds}, oneof([{seq, more_commands(20, commands(?MODULE))}, 
-                                    {par, more_commands(2, parallel_commands(?MODULE))}
-                                ]),
+    ?FORALL(Sequential, noshrink(bool()),
+    ?FORALL({Kind, Cmds}, oneof([{seq, more_commands(20, commands(?MODULE, maps:put(sequential, true, initial_state())))} || Sequential] ++ 
+                                [{par, more_commands(2, parallel_commands(?MODULE))} || not Sequential]),
     begin
         delete_level_data(Dir),
         ?IMPLIES(empty_dir(Dir),
@@ -1104,7 +1105,7 @@ prop_db() ->
                                               empty_dir(Dir))},
                                    {pid_cleanup, equals(Wait, [])}])))))))))))
         end))
-    end))).
+    end)))).
 
 history({H, _, _}) -> H.
 result({_, _, Res}) -> Res.
