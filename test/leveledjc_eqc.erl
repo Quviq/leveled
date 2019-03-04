@@ -827,6 +827,9 @@ objectfold_pre(S) ->
     is_leveled_open(S).
 
 objectfold_args(#{leveled := Pid, counter := Counter, tag := Tag}) ->
+    %% Update model to contain a list in which the elements have been added to
+    %% allow folding in sequence order
+    %% If you update, delete the old and add new at end of list
     [Pid, Tag, gen_foldacc(4), bool(), elements([key_order, sqn_order, none]), Counter].
 
 objectfold_pre(#{leveled := Leveled}, [Pid, _Tag, _FoldAccT, _Snapshot, _Order, _Counter]) ->
