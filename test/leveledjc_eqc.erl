@@ -1032,7 +1032,7 @@ prop_db() ->
     begin
         delete_level_data(Dir),
         ?IMPLIES(empty_dir(Dir),
-        ?ALWAYS(if Shrinking -> 10; true -> 1 end,
+        ?ALWAYS(if Shrinking -> 40; true -> 1 end,
         begin
             Procs = erlang:processes(),
             StartTime = erlang:system_time(millisecond),
@@ -1140,7 +1140,7 @@ gen_opts() ->
     options([%% {head_only, elements([false, no_lookup, with_lookup])} we don't test head_only mode
               {compression_method, elements([native, lz4])}
             , {compression_point, elements([on_compact, on_receipt])}
-            %% , {max_journalsize, ?LET(N, nat(), 2048 + 1000 + 32 + 16 + 16 + N)}
+            , {max_journalsize, oneof([100, ?LET(N, nat(), 2048 + 1000 + 32 + 16 + 16 + N)])}
             %% , {cache_size, oneof([nat(), 2048, 2060, 5000])}
             ]).
 
