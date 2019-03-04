@@ -57,9 +57,9 @@ iff(B1, B2) -> B1 == B2.
 implies(B1, B2) -> (not B1 orelse B2).
 
 %% start_opts should not be added to this map, it is added only when the system is started the first time.
-initial_state() ->
+initial_state(Name) ->
     #{dir => {var, dir},
-      sut => sut,
+      sut => Name,
       leveled => undefined,   %% to make adapt happy after failing pre/1
       counter => 0,
       model => [],
@@ -1027,11 +1027,12 @@ is_valid_cmd(S, mput) ->
 -spec prop_db() -> eqc:property().
 prop_db() ->
     Dir = "./leveled_data",
+    SutName = sut,
     eqc:dont_print_counterexample(
     ?LET(Shrinking, parameter(shrinking, false),
     ?FORALL(Sequential, noshrink(bool()),
-    ?FORALL({Kind, Cmds}, oneof([{seq, more_commands(20, commands(?MODULE, maps:put(sequential, true, initial_state())))} || Sequential] ++
-                                [{par, more_commands(2, parallel_commands(?MODULE))} || not Sequential]),
+    ?FORALL({Kind, Cmds}, oneof([{seq, more_commands(20, commands(?MODULE, maps:put(sequential, true, initial_state(SutName))))} || Sequential] ++
+                                [{par, more_commands(2, parallel_commands(?MODULE, initial_state(SutName)))} || not Sequential]),
     begin
         delete_level_data(Dir),
         ?IMPLIES(empty_dir(Dir),
@@ -1057,7 +1058,7 @@ prop_db() ->
 
 
 
-            case whereis(maps:get(sut, initial_state())) of
+            case whereis(SutName) of
                 undefined ->
                     % io:format("Init state undefined - deleting~n"),
                     delete_level_data(Dir);
