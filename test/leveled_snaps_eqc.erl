@@ -38,7 +38,7 @@ precondition(S, {call, _, snapshot, [_SnapName, Original, Tag, Opts]}) ->
         undefined -> false;
         LS ->
             Tag == maps:get(tag, LS) andalso
-                Opts == maps:get(start_opts, LS)
+                tl(Opts) == maps:get(start_opts, LS)
     end;
 precondition(S, {call, _, cmd, [F, Name, Args]}) ->
     case proplists:get_value(Name, S) of
