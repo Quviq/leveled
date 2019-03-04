@@ -24,7 +24,7 @@
 -include_lib("eunit/include/eunit.hrl").
 -include("../include/leveled.hrl").
 
--compile([export_all, nowarn_export_all, {nowarn_deprecated_function, 
+-compile([export_all, nowarn_export_all, {nowarn_deprecated_function,
             [{gen_fsm, send_event, 2}]}]).
 
 -define(NUMTESTS, 1000).
@@ -37,7 +37,7 @@
             true -> True;
             false -> False
         end).
-                       
+
 
 eqc_test_() ->
     Timeout = 50,
@@ -77,7 +77,7 @@ init_backend_args(#{dir := Dir, sut := Name} = S) ->
         undefined ->
             [ default(?RIAK_TAG, ?STD_TAG),  %% Just test one tag at a time
               [{root_path, Dir}, {log_level, error},
-                {max_sstslots, 2}, {cache_size, 10}, {max_pencillercachesize, 40}, {max_journalsize, 20000} 
+                {max_sstslots, 2}, {cache_size, 10}, {max_pencillercachesize, 40}, {max_journalsize, 20000}
                | gen_opts()], Name ];
         Opts ->
             %% root_path is part of existing options
@@ -87,7 +87,7 @@ init_backend_args(#{dir := Dir, sut := Name} = S) ->
 init_backend_pre(S, [Tag, Options, _]) ->
     %% for shrinking
     PreviousOptions = maps:get(start_opts, S, undefined),
-    maps:get(tag, S, Tag) == Tag andalso 
+    maps:get(tag, S, Tag) == Tag andalso
         PreviousOptions == undefined orelse PreviousOptions == Options.
 
 init_backend_adapt(S, [Tag, Options, Name]) ->
@@ -140,7 +140,7 @@ stop_next(S, _Value, [_Pid]) ->
         iclerk => undefined,
         folders => [],
         used_folders => [],
-        stop_folders => maps:get(folders, S, []) ++ maps:get(used_folders, S, [])}.  
+        stop_folders => maps:get(folders, S, []) ++ maps:get(used_folders, S, [])}.
 
 stop_post(_S, [Pid], _Res) ->
     Mon = erlang:monitor(process, Pid),
@@ -160,7 +160,7 @@ updateload_pre(S) ->
 %% updateload for specific bucket (doesn't overlap with get/put/delete)
 updateload_args(#{leveled := Pid, tag := Tag}) ->
     ?LET(Categories, gen_categories(Tag),
-    ?LET({{Key, Bucket}, Value, IndexSpec, MetaData}, 
+    ?LET({{Key, Bucket}, Value, IndexSpec, MetaData},
          {{gen_key(), <<"LoadBucket">>}, gen_val(), [{add, Cat, gen_index_value()} || Cat <- Categories ], []},
         case Tag of
             ?STD_TAG -> [Pid, Bucket, Key, Value, Value, IndexSpec, Tag, MetaData];
@@ -180,7 +180,7 @@ updateload_adapt(#{leveled := Leveled}, [_, Bucket, Key, Value, Obj, Spec, Tag, 
 updateload(Pid, Bucket, Key, Value, Obj, Spec, Tag, MetaData) ->
     Values =
         case Tag of
-                 ?STD_TAG -> multiply(100, Value); 
+                 ?STD_TAG -> multiply(100, Value);
                  ?RIAK_TAG ->
                      lists:map(fun(V) -> testutil:riak_object(Bucket, Key, V, MetaData) end,
                                  multiply(100, Value))
@@ -197,7 +197,7 @@ multiply(N, Value) when N > 1 ->
 updateload_next(#{model := Model} = S, _V, [_Pid, Bucket, Key, _Value, Obj, Spec, _Tag, _MetaData]) ->
     ?CMD_VALID(S, put,
                begin
-                   NewSpec = 
+                   NewSpec =
                        case model_find({Bucket, Key}, Model) of
                            error -> merge_index_spec([], Spec);
                            {ok, {_, OldSpec}} ->
@@ -212,7 +212,7 @@ updateload_post(S, [_, _, _, _, _, _, _, _], Results) ->
 
 updateload_features(#{previous_keys := PK} = S, [_Pid, Bucket, Key, _Value, _Obj, _, Tag, _], _Res) ->
     ?CMD_VALID(S, put,
-               case 
+               case
                    lists:member({Key, Bucket}, PK) of
                    true ->
                        [{updateload, update, Tag}];
@@ -228,13 +228,13 @@ put_pre(S) ->
 
 put_args(#{leveled := Pid, previous_keys := PK, tag := Tag}) ->
     ?LET(Categories, gen_categories(Tag),
-    ?LET({{Key, Bucket}, Value, IndexSpec, MetaData}, 
+    ?LET({{Key, Bucket}, Value, IndexSpec, MetaData},
          {gen_key_in_bucket(PK), gen_val(), [{add, Cat, gen_index_value()} || Cat <- Categories ], []},
          case Tag of
-             ?STD_TAG -> [Pid, Bucket, Key, Value, IndexSpec, elements([none, Tag])]; 
+             ?STD_TAG -> [Pid, Bucket, Key, Value, IndexSpec, elements([none, Tag])];
              ?RIAK_TAG ->
                  Obj = testutil:riak_object(Bucket, Key, Value, MetaData),
-                 [Pid, Bucket, Key, Obj, IndexSpec, Tag]  
+                 [Pid, Bucket, Key, Obj, IndexSpec, Tag]
          end)).
 
 put_pre(#{leveled := Leveled}, [Pid, _Bucket, _Key, _Value, _, _]) ->
@@ -252,7 +252,7 @@ put(Pid, Bucket, Key, Value, Spec, Tag) ->
 put_next(#{model := Model, previous_keys := PK} = S, _Value, [_Pid, Bucket, Key, Value, Spec, _Tag]) ->
     ?CMD_VALID(S, put,
                begin
-                   NewSpec = 
+                   NewSpec =
                        case model_find({Bucket, Key}, Model) of
                            error -> merge_index_spec([], Spec);
                            {ok, {_, OldSpec}} ->
@@ -268,7 +268,7 @@ put_post(S, [_, _, _, _, _, _], Res) ->
 
 put_features(#{previous_keys := PK} = S, [_Pid, Bucket, Key, _Value, _, Tag], _Res) ->
     ?CMD_VALID(S, put,
-               case 
+               case
                    lists:member({Key, Bucket}, PK) of
                    true ->
                        [{put, update, Tag}];
@@ -279,9 +279,9 @@ put_features(#{previous_keys := PK} = S, [_Pid, Bucket, Key, _Value, _, Tag], _R
 
 merge_index_spec(Spec, []) ->
     Spec;
-merge_index_spec(Spec, [{add, Cat, Idx} | Rest]) -> 
+merge_index_spec(Spec, [{add, Cat, Idx} | Rest]) ->
     merge_index_spec(lists:delete({Cat, Idx}, Spec) ++ [{Cat, Idx}], Rest);
-merge_index_spec(Spec, [{remove, Cat, Idx} | Rest]) -> 
+merge_index_spec(Spec, [{remove, Cat, Idx} | Rest]) ->
     merge_index_spec(lists:delete({Cat, Idx}, Spec), Rest).
 
 
@@ -302,7 +302,7 @@ get(Pid, Bucket, Key, Tag) ->
 get_pre(#{leveled := Leveled}, [Pid, _Bucket, _Key, _Tag]) ->
     Pid == Leveled.
 
-get_adapt(#{leveled := Leveled}, [_, Bucket, Key, Tag]) ->    
+get_adapt(#{leveled := Leveled}, [_, Bucket, Key, Tag]) ->
     [Leveled, Bucket, Key, Tag].
 
 get_post(#{model := Model} = S, [_Pid, Bucket, Key, Tag], Res) ->
@@ -320,7 +320,7 @@ get_post(#{model := Model} = S, [_Pid, Bucket, Key, Tag], Res) ->
 get_features(#{deleted_keys := DK, previous_keys := PK}, [_Pid, Bucket, Key, _Tag], Res) ->
     case Res of
         not_found ->
-            [{get, not_found, deleted} || lists:member({Key, Bucket}, DK)] ++ 
+            [{get, not_found, deleted} || lists:member({Key, Bucket}, DK)] ++
           [{get, not_found, not_inserted} || not lists:member({Key, Bucket}, PK)];
         {ok, B} when is_binary(B) ->
             [{get, found}];
@@ -383,7 +383,7 @@ head_args(#{leveled := Pid, previous_keys := PK, tag := Tag}) ->
 head_pre(#{leveled := Leveled}, [Pid, _Bucket, _Key, _Tag]) ->
     Pid == Leveled.
 
-head_adapt(#{leveled := Leveled}, [_, Bucket, Key, Tag]) ->    
+head_adapt(#{leveled := Leveled}, [_, Bucket, Key, Tag]) ->
     [Leveled, Bucket, Key, Tag].
 
 head(Pid, Bucket, Key, none) ->
@@ -398,8 +398,8 @@ head_post(#{model := Model} = S, [_Pid, Bucket, Key, Tag], Res) ->
                        model_find({Bucket, Key}, Model) =/= error;
                    not_found ->
                        %% Weird to be able to supply a tag, but must be STD_TAG...
-                       implies(lists:member(maps:get(start_opts, S), [{head_only, with_lookup}]), 
-                               lists:member(Tag, [?STD_TAG, none, ?HEAD_TAG])) orelse 
+                       implies(lists:member(maps:get(start_opts, S), [{head_only, with_lookup}]),
+                               lists:member(Tag, [?STD_TAG, none, ?HEAD_TAG])) orelse
                        model_find({Bucket, Key}, Model) == error;
                    {unsupported_message, head} ->
                        Tag =/= ?HEAD_TAG
@@ -409,7 +409,7 @@ head_post(#{model := Model} = S, [_Pid, Bucket, Key, Tag], Res) ->
 head_features(#{deleted_keys := DK, previous_keys := PK}, [_Pid, Bucket, Key, _Tag], Res) ->
     case Res of
         not_found ->
-            [{head, not_found, deleted} || lists:member({Key, Bucket}, DK)] ++ 
+            [{head, not_found, deleted} || lists:member({Key, Bucket}, DK)] ++
           [{head, not_found, not_inserted} || not lists:member({Key, Bucket}, PK)];
         {ok, {_, _, _}} ->  %% Metadata
             [{head, found}];
@@ -437,7 +437,7 @@ delete_pre(#{leveled := Leveled, model := Model}, [Pid, Bucket, Key, Spec, _Tag]
         end.
 
 delete_adapt(#{leveled := Leveled, model := Model}, [_, Bucket, Key, Spec, Tag]) ->
-    NewSpec = 
+    NewSpec =
         case model_find({Bucket, Key}, Model) of
             error -> Spec;
             {ok, {_, OldSpec}} ->
@@ -452,7 +452,7 @@ delete(Pid, Bucket, Key, Spec, Tag) ->
 
 delete_next(#{model := Model, deleted_keys := DK} = S, _Value, [_Pid, Bucket, Key, _, _]) ->
     ?CMD_VALID(S, delete,
-               S#{model => model_erase({Bucket, Key}, Model), 
+               S#{model => model_erase({Bucket, Key}, Model),
                   deleted_keys => DK ++ [{Key, Bucket} || model_is_key({Key, Bucket}, Model)]},
                S).
 
@@ -516,7 +516,7 @@ drop_pre(#{leveled := Leveled} = S, [Pid, Tag, Opts, Name]) ->
 
 drop_adapt(#{leveled := Leveled} = S, [_Pid, Tag, Opts, Name]) ->
     [Leveled | init_backend_adapt(S, [Tag, Opts, Name])].
-    
+
 %% @doc drop - The actual operation
 %% Remove fles from disk (directory structure may remain) and start a new clean database
 drop(Pid, Tag, Opts, Name) ->
@@ -531,7 +531,7 @@ drop(Pid, Tag, Opts, Name) ->
 
 drop_next(S, Value, [Pid, Tag, Opts, Name]) ->
     S1 = stop_next(S, Value, [Pid]),
-    init_backend_next(S1#{model => []}, 
+    init_backend_next(S1#{model => []},
                       Value, [Tag, Opts, Name]).
 
 drop_post(_S, [_Pid, _Tag, _Opts, _], Res) ->
@@ -542,7 +542,7 @@ drop_post(_S, [_Pid, _Tag, _Opts, _], Res) ->
 
 drop_features(#{model := Model}, [_Pid, _Tag, _Opts, _], _Res) ->
     Size = length(Model),
-    [{drop, empty} || Size == 0 ] ++ 
+    [{drop, empty} || Size == 0 ] ++
         [{drop, small} || Size > 0 andalso Size < 20 ] ++
         [{drop, medium} || Size >= 20 andalso Size < 1000 ] ++
         [{drop, large} || Size >= 1000 ].
@@ -659,8 +659,8 @@ indexfold_pre(S) ->
 
 indexfold_args(#{leveled := Pid, counter := Counter, previous_keys := PK}) ->
     ?LET({Key, Bucket}, gen_key_in_bucket(PK),
-         [Pid, default(Bucket, {Bucket, Key}), gen_foldacc(3), 
-          ?LET({[N], M}, {gen_index_value(), choose(0,2)}, {gen_category(), [N], [N+M]}), 
+         [Pid, default(Bucket, {Bucket, Key}), gen_foldacc(3),
+          ?LET({[N], M}, {gen_index_value(), choose(0,2)}, {gen_category(), [N], [N+M]}),
           {bool(),
            oneof([undefined, gen_index_value()])},
           Counter  %% add a unique counter
@@ -670,7 +670,7 @@ indexfold_pre(#{leveled := Leveled}, [Pid, _Constraint, _FoldAccT, _Range, _Term
     %% Make sure we operate on an existing Pid when shrinking
     %% Check start options validity as well?
     Pid == Leveled.
-    
+
 indexfold_adapt(#{leveled := Leveled}, [_, Constraint, FoldAccT, Range, TermHandling, Counter]) ->
     %% Keep the counter!
     [Leveled, Constraint, FoldAccT, Range, TermHandling, Counter].
@@ -683,7 +683,7 @@ indexfold(Pid, Constraint, FoldAccT, Range, {ReturnTerms, RegExp}, _Counter) ->
     {async, Folder} = leveled_bookie:book_indexfold(Pid, Constraint, FoldAccT, Range, {ReturnTerms, RE}),
     Folder.
 
-indexfold_next(#{folders := Folders} = S, SymFolder, 
+indexfold_next(#{folders := Folders} = S, SymFolder,
                [_, Constraint, {Fun, Acc}, {Category, From, To}, {ReturnTerms, RegExp}, Counter]) ->
     ConstraintFun =
         fun(B, K, Bool) ->
@@ -693,14 +693,14 @@ indexfold_next(#{folders := Folders} = S, SymFolder,
                     _ -> false
                 end
         end,
-    S#{folders => 
-           Folders ++ 
+    S#{folders =>
+           Folders ++
            [#{counter => Counter,
               type => indexfold,
               folder => SymFolder,
               reusable => true,
               result => fun(Model) ->
-                                Select = 
+                                Select =
                                     lists:sort(
                                       model_fold(none, fun({B, K}, {_V, Spec}, A) ->
                                                            [ {B, {Idx, K}}
@@ -716,7 +716,7 @@ indexfold_next(#{folders := Folders} = S, SymFolder,
                                                ({B, {_, NK}}, A) ->
                                                     Fun(B, NK, A)
                                             end, Acc, Select)
-                        end 
+                        end
              }],
        counter =>  Counter + 1}.
 
@@ -733,7 +733,7 @@ indexfold_features(_S, [_Pid, Constraint, FoldAccT, _Range, {ReturnTerms, _}, _C
 
 
 %% --- Operation: keylist folding ---
-%% slack discussion: "`book_keylist` only passes `Bucket` and `Key` into the accumulator, ignoring SubKey - 
+%% slack discussion: "`book_keylist` only passes `Bucket` and `Key` into the accumulator, ignoring SubKey -
 %% so I don't think this can be used in head_only mode to return results that make sense"
 %%
 %% There are also keylist functions that take a specific bucket and range into account. Not considered yet.
@@ -749,7 +749,7 @@ keylistfold_pre(#{leveled := Leveled}, [Pid, _Tag, _FoldAccT, _Counter]) ->
     %% Make sure we operate on an existing Pid when shrinking
     %% Check start options validity as well?
     Pid == Leveled.
-    
+
 keylistfold_adapt(#{leveled := Leveled}, [_, Tag, FoldAccT, Counter]) ->
     %% Keep the counter!
     [Leveled, Tag, FoldAccT, Counter].
@@ -758,10 +758,10 @@ keylistfold(Pid, Tag, FoldAccT, _Counter) ->
     {async, Folder} = leveled_bookie:book_keylist(Pid, Tag, FoldAccT),
     Folder.
 
-keylistfold_next(#{folders := Folders, model := Model} = S, SymFolder, 
+keylistfold_next(#{folders := Folders, model := Model} = S, SymFolder,
                [_, _Tag, {Fun, Acc}, Counter]) ->
-    S#{folders => 
-           Folders ++ 
+    S#{folders =>
+           Folders ++
            [#{counter => Counter,
               type => keylist,
               folder => SymFolder,
@@ -794,13 +794,13 @@ bucketlistfold(Pid, Tag, FoldAccT, Constraints, _) ->
     {async, Folder} = leveled_bookie:book_bucketlist(Pid, Tag, FoldAccT, Constraints),
     Folder.
 
-bucketlistfold_next(#{folders := Folders} = S, SymFolder, 
+bucketlistfold_next(#{folders := Folders} = S, SymFolder,
                     [_, _, {Fun, Acc}, Constraints, Counter]) ->
-    S#{folders => 
-           Folders ++ 
+    S#{folders =>
+           Folders ++
            [#{counter => Counter,
               type => bucketlist,
-              folder => SymFolder, 
+              folder => SymFolder,
               reusable => true,
               result => fun(Model) ->
                                 Bs = model_fold(none, fun({B, _K}, _V, A) -> A ++ [B || not lists:member(B, A)] end, [], Model),
@@ -812,7 +812,7 @@ bucketlistfold_next(#{folders := Folders} = S, SymFolder,
                                     {first, [First|_]} ->
                                         lists:foldl(fun(B, A) -> Fun(B, A) end, Acc, [First])
                                 end
-                        end        
+                        end
              }],
        counter => Counter + 1}.
 
@@ -839,26 +839,26 @@ objectfold_adapt(#{leveled := Leveled}, [_Pid, Tag, FoldAccT, Snapshot, Order, C
     [Leveled, Tag, FoldAccT, Snapshot, Order, Counter].
 
 objectfold(Pid, Tag, FoldAccT, Snapshot, Order, _Counter) ->
-    {async, Folder} = 
+    {async, Folder} =
         case Order of
             none -> leveled_bookie:book_objectfold(Pid, Tag, FoldAccT, Snapshot);
             _ -> leveled_bookie:book_objectfold(Pid, Tag, FoldAccT, Snapshot, Order)
         end,
     Folder.
 
-objectfold_next(#{folders := Folders, model := Model} = S, SymFolder, 
+objectfold_next(#{folders := Folders, model := Model} = S, SymFolder,
                 [_Pid, _Tag, {Fun, Acc}, Snapshot, Order, Counter]) ->
-    S#{folders => 
-           Folders ++ 
+    S#{folders =>
+           Folders ++
            [#{counter => Counter,
               type => objectfold,
-              folder => SymFolder, 
+              folder => SymFolder,
               reusable => not Snapshot,
               result =>
                   case Order of
                       sqn_order ->
                           fun(M) ->
-                                  OnModel =  
+                                  OnModel =
                                       case Snapshot of
                                           true -> Model;
                                           false -> M
@@ -868,14 +868,14 @@ objectfold_next(#{folders := Folders, model := Model} = S, SymFolder,
                           end;
                       _ ->
                           fun(M) ->
-                                  OnModel =  
+                                  OnModel =
                                       case Snapshot of
                                           true -> Model;
                                           false -> M
                                       end,
                                   Objs = model_fold(Order, fun({B, K}, {V, _}, A) -> [{B, K, V} | A] end, [], OnModel),
                                   lists:foldr(fun({B, K, V}, A) -> Fun(B, K, V, A) end, Acc, Objs)
-                          end                      
+                          end
                   end
              }],
        counter => Counter + 1}.
@@ -913,12 +913,12 @@ fold_run_next(#{folders := Folders} = S, _Value, [Counter, _Folder]) ->
             UsedFolders = maps:get(used_folders, S, []),
             S#{folders => Folders -- [FoldObj],
                used_folders => UsedFolders ++ [FoldObj]};
-        _ -> 
+        _ ->
             S
     end.
-    
+
 fold_run_post(#{folders := Folders, leveled := Leveled, model := Model}, [Count, _], Res) ->
-    case Leveled of 
+    case Leveled of
         undefined ->
             is_exit(Res);
         _ ->
@@ -933,7 +933,7 @@ fold_run_features(#{folders := Folders, leveled := Leveled}, [Count, _Folder], R
         [ {fold_run, found_list, length(Res)}|| is_list(Res) ] ++
          [ {fold_run, found_integer}|| is_integer(Res) ].
 
-               
+
 %% --- Operation: fold_run on already used folder ---
 %% A fold that has already ran to completion should results in an exception when re-used.
 %% leveled_runner comment: "Iterators should de-register themselves from the Penciller on completion."
@@ -947,7 +947,7 @@ noreuse_fold_args(#{used_folders := Folders}) ->
 noreuse_fold_pre(S, [Counter, _Folder]) ->
     %% Ensure membership even under shrinking
     %% Counter is fixed at first generation and does not shrink!
-    lists:member(Counter, 
+    lists:member(Counter,
                  [ maps:get(counter, Used) || Used <- maps:get(used_folders, S, []) ]).
 
 noreuse_fold(_, Folder) ->
@@ -972,7 +972,7 @@ stop_fold_args(#{stop_folders := Folders}) ->
 stop_fold_pre(S, [Counter, _Folder]) ->
     %% Ensure membership even under shrinking
     %% Counter is fixed at first generation and does not shrink!
-    lists:member(Counter, 
+    lists:member(Counter,
                  [ maps:get(counter, Used) || Used <- maps:get(stop_folders, S, []) ]).
 
 stop_fold(_, Folder) ->
@@ -983,7 +983,7 @@ stop_fold_post(_S, [_Counter, _], Res) ->
 
 stop_fold_features(S, [_, _], _) ->
     [ case maps:get(leveled, S) of
-          undefined -> 
+          undefined ->
               stop_fold_when_closed;
           _ ->
               stop_fold_when_open
@@ -1027,10 +1027,10 @@ is_valid_cmd(S, mput) ->
 -spec prop_db() -> eqc:property().
 prop_db() ->
     Dir = "./leveled_data",
-    eqc:dont_print_counterexample( 
+    eqc:dont_print_counterexample(
     ?LET(Shrinking, parameter(shrinking, false),
     ?FORALL(Sequential, noshrink(bool()),
-    ?FORALL({Kind, Cmds}, oneof([{seq, more_commands(20, commands(?MODULE, maps:put(sequential, true, initial_state())))} || Sequential] ++ 
+    ?FORALL({Kind, Cmds}, oneof([{seq, more_commands(20, commands(?MODULE, maps:put(sequential, true, initial_state())))} || Sequential] ++
                                 [{par, more_commands(2, parallel_commands(?MODULE))} || not Sequential]),
     begin
         delete_level_data(Dir),
@@ -1043,9 +1043,9 @@ prop_db() ->
             RunResult = execute(Kind, Cmds, [{dir, Dir}]),
             %% Do not extract the 'state' from this tuple, since parallel commands
             %% miss the notion of final state.
-            CallFeatures = [ Feature || Feature <- call_features(history(RunResult)), 
+            CallFeatures = [ Feature || Feature <- call_features(history(RunResult)),
                                         not is_foldaccT(Feature),
-                                        not (is_tuple(Feature) andalso element(1, Feature) == start_options) 
+                                        not (is_tuple(Feature) andalso element(1, Feature) == start_options)
                            ],
             StartOptionFeatures = [ lists:keydelete(root_path, 1, Feature) || {start_options, Feature} <- call_features(history(RunResult)) ],
 
@@ -1054,11 +1054,11 @@ prop_db() ->
             LedgerFiles = ledgerpersisted(Dir),
             JournalFiles = journalwritten(Dir),
             % io:format("File counts: Compacted ~w Journal ~w Ledger ~w~n", [length(CompactionFiles), length(LedgerFiles), length(JournalFiles)]),
-            
+
 
 
             case whereis(maps:get(sut, initial_state())) of
-                undefined -> 
+                undefined ->
                     % io:format("Init state undefined - deleting~n"),
                     delete_level_data(Dir);
                 Pid when is_pid(Pid) ->
@@ -1068,7 +1068,7 @@ prop_db() ->
 
             Wait = wait_for_procs(Procs, 12000),
                 % Wait at least for delete_pending timeout + 1s
-                % However, even then can hit the issue of the Quviq license 
+                % However, even then can hit the issue of the Quviq license
                 % call spawning processes
             lists:foreach(fun(P) ->
                                 io:format("~nProcess info for ~w:~n~w~n",
@@ -1097,13 +1097,13 @@ prop_db() ->
             aggregate(with_title('Features'), CallFeatures,
             aggregate(with_title('Start Options'), StartOptionFeatures,
             features(CallFeatures,
-                      conjunction([{result, 
+                      conjunction([{result,
                                     ?WHENFAIL([ begin
                                                     eqc:format("~p with acc ~p:\n~s\n", [F, Acc,
                                                                                          show_function(F)])
                                                 end || {F, Acc} <- FoldAccTs ],
                                               result(RunResult) == ok)},
-                                   {data_cleanup, 
+                                   {data_cleanup,
                                     ?WHENFAIL(eqc:format("~s\n", [os:cmd("ls -Rl " ++ Dir)]),
                                               empty_dir(Dir))},
                                    {pid_cleanup, equals(Wait, [])}])))))))))))
@@ -1157,7 +1157,7 @@ gen_key() ->
 
 %% Cannot be atoms!
 %% key() type specified: should be binary().
-gen_bucket() -> 
+gen_bucket() ->
     elements([<<"bucket1">>, <<"bucket2">>, <<"bucket3">>]).
 
 gen_val() ->
@@ -1205,7 +1205,7 @@ gen_foldacc(4) ->
 
 fold_buckets() ->
     {fun(B, Acc) -> [B | Acc] end, []}.
-             
+
 fold_collect() ->
     {fun(X, Y, Acc) -> [{X, Y} | Acc] end, []}.
 
@@ -1238,7 +1238,7 @@ get_foldobj([#{counter := Counter} = Map | _Rest], Counter) ->
     Map;
 get_foldobj([_ | Rest], Counter) ->
     get_foldobj(Rest, Counter).
-                
+
 
 %% Helper for all those preconditions that just check that leveled Pid
 %% is populated in state. (We cannot check with is_pid, since that's
@@ -1263,11 +1263,11 @@ wait_for_procs(Known, Timeout) ->
     end.
 
 filtered_processes(Known) ->
-    FilterFun = 
+    FilterFun =
         fun(P) ->
             case process_info(P, current_stacktrace) of
                 {current_stacktrace, ST} ->
-                    case lists:keymember(eqc_licence, 1, ST) or 
+                    case lists:keymember(eqc_licence, 1, ST) or
                             lists:keymember(eqc_group_commands, 1, ST) of
                         true ->
                             % This is an eqc background process
@@ -1335,4 +1335,3 @@ model_fold(Order, Fun, Acc, Model) when Order == key_order; Order == none->
     orddict:fold(Fun, Acc, orddict:from_list(Model));
 model_fold(sqn_order, Fun, Acc, Model) ->
     lists:foldl(Fun, Acc, Model).
-
