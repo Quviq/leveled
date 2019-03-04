@@ -806,9 +806,9 @@ book_objectfold(Pid, Tag, FoldAccT, SnapPreFold) ->
 %% `Order'. `Order' can be `sqn_order' or `key_order'. In
 %% book_objectfold/4 and book_objectfold/6 `key_order' is
 %% implied. This function called with `Option == key_order' is
-%% identical to book_objectfold/4. NOTE: if you most fold over ALL
+%% identical to book_objectfold/4. NOTE: if you must fold over ALL
 %% objects, this is quicker than `key_order' due to accessing the
-%% journal objects in thei ron disk order, not via a fold over the
+%% journal objects in their on disk order, not via a fold over the
 %% ledger.
 -spec book_objectfold(pid(), Tag, FoldAccT, SnapPreFold, Order) -> {async, Runner} when
       Tag :: leveled_codec:tag(),
@@ -1030,8 +1030,8 @@ book_islastcompactionpending(Pid) ->
 
 %% @doc Trim the journal when in head_only mode
 %%
-%% In head_only mode the journlacna be trimmed of entries which are before the 
-%% persisted SQN.  This is much quicker than compacting the journal
+%% In head_only mode the journal can be trimmed of entries which are before the 
+%% persisted SQN. This is much quicker than compacting the journal
 
 book_trimjournal(Pid) ->
     gen_server:call(Pid, trim, infinity).
