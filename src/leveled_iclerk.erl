@@ -25,7 +25,7 @@
 %% those deltas will be resolved through external anti-entropy (e.g. read
 %% repair or AAE) - or alternatively the risk of loss of persisted data from
 %% the ledger is accepted for this data type
-%% 
+%%
 %% During the compaction process for the Journal, the file chosen for
 %% compaction is scanned in SQN order, and a FilterFun is passed (which will
 %% normally perform a check against a snapshot of the persisted part of the
@@ -89,7 +89,7 @@
         clerk_stop/1,
         clerk_loglevel/2,
         clerk_addlogs/2,
-        clerk_removelogs/2]).   
+        clerk_removelogs/2]).
 
 -export([schedule_compaction/3]).
 
@@ -133,16 +133,16 @@
 -type candidate() :: #candidate{}.
 -type scoring_state() :: #scoring_state{}.
 -type score_parameters() :: {integer(), float(), float()}.
-    % Score parameters are a tuple 
-    % - of maximum run length; how long a run of consecutive files can be for 
+    % Score parameters are a tuple
+    % - of maximum run length; how long a run of consecutive files can be for
     % one compaction run
-    % - maximum run compaction target; percentage space which should be 
+    % - maximum run compaction target; percentage space which should be
     % released from a compaction run of the maximum length to make it a run
-    % worthwhile of compaction (released space is 100.0 - target e.g. 70.0 
-    % means that 30.0% should be released) 
-    % - single_file compaction target; percentage space which should be 
+    % worthwhile of compaction (released space is 100.0 - target e.g. 70.0
+    % means that 30.0% should be released)
+    % - single_file compaction target; percentage space which should be
     % released from a compaction run of a single file to make it a run
-    % worthwhile of compaction (released space is 100.0 - target e.g. 70.0 
+    % worthwhile of compaction (released space is 100.0 - target e.g. 70.0
     % means that 30.0% should be released)
 -type key_size() ::
     {{non_neg_integer(),
@@ -165,13 +165,13 @@ clerk_new(InkerClerkOpts) ->
     gen_server:start_link(?MODULE, [leveled_log:get_opts(), InkerClerkOpts], []).
 
 -spec clerk_compact(pid(),
-                    pid(), 
+                    pid(),
                     leveled_inker:filterinitfun(),
                     leveled_inker:filterclosefun(),
-                    leveled_inker:filterfun(),  
+                    leveled_inker:filterfun(),
                     list()) -> ok.
 %% @doc
-%% Trigger a compaction for this clerk if the threshold of data recovery has 
+%% Trigger a compaction for this clerk if the threshold of data recovery has
 %% been met
 clerk_compact(Pid, Checker, InitiateFun, CloseFun, FilterFun, Manifest) ->
     gen_server:cast(Pid,
@@ -188,7 +188,7 @@ clerk_compact(Pid, Checker, InitiateFun, CloseFun, FilterFun, Manifest) ->
 clerk_trim(Pid, PersistedSQN, ManifestAsList) ->
     gen_server:cast(Pid, {trim, PersistedSQN, ManifestAsList}).
 
--spec clerk_promptdeletions(pid(), pos_integer(), list()) -> ok. 
+-spec clerk_promptdeletions(pid(), pos_integer(), list()) -> ok.
 %% @doc
 %%
 clerk_promptdeletions(Pid, ManifestSQN, DeletedFiles) ->
@@ -249,15 +249,15 @@ init([LogOpts, IClerkOpts]) ->
     CDBopts = IClerkOpts#iclerk_options.cdb_options,
     WP = CDBopts#cdb_options.waste_path,
     WRP = IClerkOpts#iclerk_options.waste_retention_period,
-    
-    MRL = 
+
+    MRL =
         case IClerkOpts#iclerk_options.max_run_length of
             undefined ->
                 ?MAX_COMPACTION_RUN;
             MRL0 ->
                 MRL0
         end,
-    
+
     SFL_CompPerc =
         case IClerkOpts#iclerk_options.singlefile_compactionperc of
             undefined ->
@@ -272,7 +272,7 @@ init([LogOpts, IClerkOpts]) ->
             MRLCP when is_float(MRLCP) ->
                 MRLCP
         end,
-    
+
     {ok, #state{max_run_length = MRL,
                         inker = IClerkOpts#iclerk_options.inker,
                         cdb_options = CDBopts,
@@ -281,9 +281,9 @@ init([LogOpts, IClerkOpts]) ->
                         waste_retention_period = WRP,
                         singlefile_compactionperc = SFL_CompPerc,
                         maxrunlength_compactionperc = MRL_CompPerc,
-                        compression_method = 
+                        compression_method =
                             IClerkOpts#iclerk_options.compression_method,
-                        score_onein = 
+                        score_onein =
                             IClerkOpts#iclerk_options.score_onein
                         }}.
 
@@ -306,10 +306,10 @@ handle_cast({compact, Checker, InitiateFun, CloseFun, FilterFun, Manifest0},
                                 State#state.max_run_length]),
     % Empty the waste folder
     clear_waste(State),
-    SW = os:timestamp(), 
+    SW = os:timestamp(),
         % Clock to record the time it takes to calculate the potential for
         % compaction
-    
+
     % Need to fetch manifest at start rather than have it be passed in
     % Don't want to process a queued call waiting on an old manifest
     [_Active|Manifest] = Manifest0,
@@ -334,7 +334,7 @@ handle_cast({score_filelist, [Entry|Tail]}, State) ->
         case {leveled_cdb:cdb_getcachedscore(JournalP, os:timestamp()),
                 leveled_rand:uniform(State#state.score_onein) == 1,
                 State#state.score_onein} of
-            {CachedScore, _UseNewScore, ScoreOneIn} 
+            {CachedScore, _UseNewScore, ScoreOneIn}
                     when CachedScore == undefined; ScoreOneIn == 1 ->
                 % If caches are not used, always use the current score
                 check_single_file(JournalP,
@@ -349,7 +349,7 @@ handle_cast({score_filelist, [Entry|Tail]}, State) ->
                 % Expectation is that this will reduce instances of individual
                 % files being compacted when a run is missed due to cached
                 % scores being used in surrounding journals
-                NewScore = 
+                NewScore =
                     check_single_file(JournalP,
                                     ScoringState#scoring_state.filter_fun,
                                     ScoringState#scoring_state.filter_server,
@@ -380,8 +380,8 @@ handle_cast(scoring_complete, State) ->
     CloseFun = ScoringState#scoring_state.close_fun,
     SW = ScoringState#scoring_state.start_time,
     ScoreParams =
-        {MaxRunLength, 
-            State#state.maxrunlength_compactionperc, 
+        {MaxRunLength,
+            State#state.maxrunlength_compactionperc,
             State#state.singlefile_compactionperc},
     {BestRun0, Score} = assess_candidates(Candidates, ScoreParams),
     leveled_log:log_timer(ic003, [Score, length(BestRun0)], SW),
@@ -414,7 +414,7 @@ handle_cast(scoring_complete, State) ->
     end,
     {noreply, State#state{scoring_state = undefined}, hibernate};
 handle_cast({trim, PersistedSQN, ManifestAsList}, State) ->
-    FilesToDelete = 
+    FilesToDelete =
         leveled_imanifest:find_persistedentries(PersistedSQN, ManifestAsList),
     leveled_log:log(ic007, []),
     ok = leveled_inker:ink_clerkcomplete(State#state.inker, [], FilesToDelete),
@@ -463,8 +463,8 @@ code_change(_OldVsn, State, _Extra) ->
 %%% External functions
 %%%============================================================================
 
--spec schedule_compaction(list(integer()), 
-                            integer(), 
+-spec schedule_compaction(list(integer()),
+                            integer(),
                             {integer(), integer(), integer()}) -> integer().
 %% @doc
 %% Schedule the next compaction event for this store.  Chooses a random
@@ -488,15 +488,15 @@ schedule_compaction(CompactionHours, RunsPerDay, CurrentTS) ->
     % n intervals at random, but then only chose the next one.  After each
     % event is occurred the random process is repeated to determine the next
     % event to schedule i.e. the unused schedule is discarded.
-    
+
     IntervalLength = 60 div ?INTERVALS_PER_HOUR,
     TotalHours = length(CompactionHours),
-    
+
     LocalTime = calendar:now_to_local_time(CurrentTS),
     {{NowY, NowMon, NowD},
         {NowH, NowMin, _NowS}} = LocalTime,
     CurrentInterval = {NowH, NowMin div IntervalLength + 1},
-    
+
     % Randomly select an hour and an interval for each of the runs expected
     % today.
     RandSelect =
@@ -506,13 +506,13 @@ schedule_compaction(CompactionHours, RunsPerDay, CurrentTS) ->
         end,
     RandIntervals = lists:sort(lists:map(RandSelect,
                                             lists:seq(1, RunsPerDay))),
-    
+
     % Pick the next interval from the list.  The intervals before current time
     % are considered as intervals tomorrow, so will only be next if there are
     % no other today
     CheckNotBefore = fun(A) -> A =< CurrentInterval end,
     {TooEarly, MaybeOK} = lists:splitwith(CheckNotBefore, RandIntervals),
-    {NextDate, {NextH, NextI}} = 
+    {NextDate, {NextH, NextI}} =
         case MaybeOK of
             [] ->
                 % Use first interval picked tomorrow if none of selected run times
@@ -523,7 +523,7 @@ schedule_compaction(CompactionHours, RunsPerDay, CurrentTS) ->
             _ ->
                 {{NowY, NowMon, NowD}, lists:nth(1, MaybeOK)}
         end,
-    
+
     % Calculate the offset in seconds to this next interval
     NextS0 = NextI * (IntervalLength * 60)
                 - leveled_rand:uniform(IntervalLength * 60),
@@ -533,7 +533,7 @@ schedule_compaction(CompactionHours, RunsPerDay, CurrentTS) ->
                                         {NextDate, {NextH, NextM, NextS}}),
     {Days, {Hours, Mins, Secs}} = TimeDiff,
     Days * 86400 + Hours * 3600 + Mins * 60 + Secs.
-    
+
 
 %%%============================================================================
 %%% Internal functions
@@ -547,15 +547,15 @@ schedule_compaction(CompactionHours, RunsPerDay, CurrentTS) ->
                         leveled_codec:compaction_strategy()) ->
                             float().
 %% @doc
-%% Get a score for a single CDB file in the journal.  This will pull out a bunch 
+%% Get a score for a single CDB file in the journal.  This will pull out a bunch
 %% of keys and sizes at random in an efficient way (by scanning the hashtable
 %% then just picking the key and size information of disk).
-%% 
-%% The score should represent a percentage which is the size of the file by 
-%% comparison to the original file if compaction was to be run.  So if a file 
+%%
+%% The score should represent a percentage which is the size of the file by
+%% comparison to the original file if compaction was to be run.  So if a file
 %% can be reduced in size by 30% the score will be 70%.
-%% 
-%% The score is based on a random sample - so will not be consistent between 
+%%
+%% The score is based on a random sample - so will not be consistent between
 %% calls.
 check_single_file(CDB, FilterFun, FilterServer, MaxSQN,
                     SampleSize, BatchSize,
@@ -564,7 +564,7 @@ check_single_file(CDB, FilterFun, FilterServer, MaxSQN,
     SW = os:timestamp(),
     PositionList = leveled_cdb:cdb_getpositions(CDB, SampleSize),
     KeySizeList = fetch_inbatches(PositionList, BatchSize, CDB, []),
-    Score = 
+    Score =
         size_comparison_score(KeySizeList,
                                 FilterFun,
                                 FilterServer,
@@ -611,12 +611,12 @@ size_comparison_score(KeySizeList,
                 _ ->
                     % There is a key which is not in expected format
                     % Not that the key-size list has been filtered for
-                    % errors by leveled_cdb - but this doesn't know the 
+                    % errors by leveled_cdb - but this doesn't know the
                     % expected format of the key
                     {ActSize, RplSize}
             end
         end,
-            
+
     R0 = lists:foldl(FoldFunForSizeCompare, {0, 0}, KeySizeList),
     {ActiveSize, ReplacedSize} = R0,
     case ActiveSize + ReplacedSize of
@@ -631,7 +631,7 @@ fetch_inbatches([], _BatchSize, CDB, CheckedList) ->
     ok = leveled_cdb:cdb_clerkcomplete(CDB),
     CheckedList;
 fetch_inbatches(PositionList, BatchSize, CDB, CheckedList) ->
-    {Batch, Tail} = 
+    {Batch, Tail} =
         if
             length(PositionList) >= BatchSize ->
                 lists:split(BatchSize, PositionList);
@@ -642,26 +642,26 @@ fetch_inbatches(PositionList, BatchSize, CDB, CheckedList) ->
     fetch_inbatches(Tail, BatchSize, CDB, CheckedList ++ KL_List).
 
 
--spec assess_candidates(list(candidate()), score_parameters()) 
+-spec assess_candidates(list(candidate()), score_parameters())
                                             -> {list(candidate()), float()}.
 %% @doc
 %% For each run length we need to assess all the possible runs of candidates,
 %% to determine which is the best score - to be put forward as the best
 %% candidate run for compaction.
-%% 
+%%
 %% Although this requires many loops over the list of the candidate, as the
 %% file scores have already been calculated the cost per loop should not be
 %% a high burden.  Reducing the maximum run length, will reduce the cost of
 %% this exercise should be a problem.
 %%
 %% The score parameters are used to produce the score of the compaction run,
-%% with a higher score being better.  The parameters are the maximum run 
+%% with a higher score being better.  The parameters are the maximum run
 %% length and the compaction targets (for max run length and single file).
 %% The score of an individual file is the approximate percentage of the space
-%% that would be retained after compaction (e.g. 100 less the percentage of 
-%% space wasted by historic objects). 
+%% that would be retained after compaction (e.g. 100 less the percentage of
+%% space wasted by historic objects).
 %%
-%% So a file score of 60% indicates that 40% of the space would be 
+%% So a file score of 60% indicates that 40% of the space would be
 %% reclaimed following compaction.  A single file target of 50% would not be
 %% met for this file.  However, if there are 4 consecutive files scoring 60%,
 %% and the maximum run length is 4, and the maximum run length compaction
@@ -678,13 +678,13 @@ assess_candidates(AllCandidates, Params) ->
         end,
     % Check all run lengths to find the best candidate.  Reverse the list of
     % run lengths, so that longer runs win on equality of score
-    lists:foldl(FoldFun, 
-                {NaiveBestRun, score_run(NaiveBestRun, Params)}, 
-                lists:reverse(lists:seq(1, MaxRunLength))).
+    lists:foldl(FoldFun,
+                {NaiveBestRun, score_run(NaiveBestRun, Params)},
+                lists:seq(MaxRunLength, 1, -1)).
 
 
--spec assess_for_runlength(integer(), list(candidate()), score_parameters(), 
-                            {list(candidate()), float()}) 
+-spec assess_for_runlength(integer(), list(candidate()), score_parameters(),
+                            {list(candidate()), float()})
                                 -> {list(candidate()), float()}.
 %% @doc
 %% For a given run length, calculate the scores for all consecutive runs of
@@ -707,14 +707,14 @@ assess_for_runlength(RunLength, AllCandidates, Params, Best) ->
 
 -spec score_run(list(candidate()), score_parameters()) -> float().
 %% @doc
-%% Score a run.  Caluclate the avergae score across all the files in the run, 
+%% Score a run.  Caluclate the avergae score across all the files in the run,
 %% and deduct that from a target score.  Good candidate runs for comapction
-%% have larger (positive) scores.  Bad candidate runs for compaction have 
+%% have larger (positive) scores.  Bad candidate runs for compaction have
 %% negative scores.
 score_run([], _Params) ->
     0.0;
 score_run(Run, {MaxRunLength, MR_CT, SF_CT}) ->
-    TargetIncr = 
+    TargetIncr =
         case MaxRunLength of
             1 ->
                 0.0;
@@ -743,7 +743,7 @@ sort_run(RunOfFiles) ->
                     Cand1#candidate.low_sqn =< Cand2#candidate.low_sqn end,
     lists:sort(CompareFun, RunOfFiles).
 
-compact_files(BestRun, CDBopts, FilterFun, FilterServer, 
+compact_files(BestRun, CDBopts, FilterFun, FilterServer,
                                             MaxSQN, RStrategy, PressMethod) ->
     BatchesOfPositions = get_all_positions(BestRun, []),
     compact_files(BatchesOfPositions,
@@ -765,7 +765,7 @@ compact_files([], _CDBopts, ActiveJournal0, _FilterFun, _FilterServer, _MaxSQN,
     ManSlice1 = ManSlice0 ++ leveled_imanifest:generate_entry(ActiveJournal0),
     ManSlice1;
 compact_files([Batch|T], CDBopts, ActiveJournal0,
-                            FilterFun, FilterServer, MaxSQN, 
+                            FilterFun, FilterServer, MaxSQN,
                             RStrategy, PressMethod, ManSlice0) ->
     {SrcJournal, PositionList} = Batch,
     KVCs0 = leveled_cdb:cdb_directfetch(SrcJournal,
@@ -777,7 +777,7 @@ compact_files([Batch|T], CDBopts, ActiveJournal0,
                             MaxSQN,
                             RStrategy),
     {ActiveJournal1, ManSlice1} = write_values(KVCs1,
-                                                CDBopts, 
+                                                CDBopts,
                                                 ActiveJournal0,
                                                 ManSlice0,
                                                 PressMethod),
@@ -819,7 +819,7 @@ split_positions_into_batches(Positions, Journal, Batches) ->
 %% in the compacted journal file.  To be required, they must still be active
 %% (i.e. be the current SQN for that LedgerKey in the Ledger).  However, if
 %% it is not active, we still need to retain some information if for this
-%% object tag we want to be able to rebuild the KeyStore by relaoding the 
+%% object tag we want to be able to rebuild the KeyStore by relaoding the
 %% KeyDeltas (the retain reload strategy)
 %%
 %% If the reload strategy is recalc, we assume that we can reload by
@@ -899,13 +899,13 @@ to_retain(JournalKey, FilterFun, FilterServer, MaxSQN, ReloadStrategy) ->
 write_values([], _CDBopts, Journal0, ManSlice0, _PressMethod) ->
     {Journal0, ManSlice0};
 write_values(KVCList, CDBopts, Journal0, ManSlice0, PressMethod) ->
-    KVList = 
+    KVList =
         lists:map(fun({K, V, _C}) ->
                             % Compress the value as part of compaction
                         {K, leveled_codec:maybe_compress(V, PressMethod)}
                     end,
                     KVCList),
-    {ok, Journal1} = 
+    {ok, Journal1} =
         case Journal0 of
             null ->
                 {TK, _TV} = lists:nth(1, KVList),
@@ -925,7 +925,7 @@ write_values(KVCList, CDBopts, Journal0, ManSlice0, PressMethod) ->
             ManSlice1 = ManSlice0 ++ leveled_imanifest:generate_entry(Journal1),
             write_values(KVCList, CDBopts, null, ManSlice1, PressMethod)
     end.
-                        
+
 clear_waste(State) ->
     case State#state.waste_path of
         undefined ->
@@ -972,7 +972,7 @@ schedule_test_bycount(N) ->
     ?assertMatch(true, SecondsToCompaction0 > 1800),
     ?assertMatch(true, SecondsToCompaction0 < 5700),
     SecondsToCompaction1 = schedule_compaction([14], N, CurrentTS), % tomorrow!
-    io:format("Seconds to compaction ~w for count ~w~n", 
+    io:format("Seconds to compaction ~w for count ~w~n",
                 [SecondsToCompaction1, N]),
     ?assertMatch(true, SecondsToCompaction1 >= 81180),
     ?assertMatch(true, SecondsToCompaction1 =< 84780).
@@ -1058,7 +1058,7 @@ test_ledgerkey(Key) ->
     {o, "Bucket", Key, null}.
 
 test_inkerkv(SQN, Key, V, IdxSpecs) ->
-    leveled_codec:to_inkerkv(test_ledgerkey(Key), SQN, V, IdxSpecs, 
+    leveled_codec:to_inkerkv(test_ledgerkey(Key), SQN, V, IdxSpecs,
                                 native, false).
 
 fetch_testcdb(RP) ->
@@ -1170,7 +1170,7 @@ compact_single_file_recovr_test() ->
                                 {2,
                                     stnd,
                                     test_ledgerkey("Key2")}),
-    ?assertMatch({{_, _}, {"Value2", {[], infinity}}}, 
+    ?assertMatch({{_, _}, {"Value2", {[], infinity}}},
                     leveled_codec:from_inkerkv(RKV1)),
     ok = leveled_cdb:cdb_close(PidR),
     ok = leveled_cdb:cdb_deletepending(CDB),
@@ -1212,7 +1212,7 @@ compact_single_file_retain_test() ->
                                 {2,
                                     stnd,
                                     test_ledgerkey("Key2")}),
-    ?assertMatch({{_, _}, {"Value2", {[], infinity}}}, 
+    ?assertMatch({{_, _}, {"Value2", {[], infinity}}},
                     leveled_codec:from_inkerkv(RKV1)),
     ok = leveled_cdb:cdb_close(PidR),
     ok = leveled_cdb:cdb_deletepending(CDB),
@@ -1242,7 +1242,7 @@ compare_candidate_test() ->
     Candidate3 = #candidate{low_sqn=3},
     Candidate4 = #candidate{low_sqn=4},
     ?assertMatch([Candidate1, Candidate2, Candidate3, Candidate4],
-                sort_run([Candidate3, Candidate2, Candidate4, Candidate1])).       
+                sort_run([Candidate3, Candidate2, Candidate4, Candidate1])).
 
 compact_singlefile_totwosmallfiles_test_() ->
     {timeout, 60, fun compact_singlefile_totwosmallfiles_testto/0}.
@@ -1257,8 +1257,8 @@ compact_singlefile_totwosmallfiles_testto() ->
     lists:foreach(fun(X) ->
                         LK = test_ledgerkey("Key" ++ integer_to_list(X)),
                         Value = leveled_rand:rand_bytes(1024),
-                        {IK, IV} = 
-                            leveled_codec:to_inkerkv(LK, X, Value, 
+                        {IK, IV} =
+                            leveled_codec:to_inkerkv(LK, X, Value,
                                                         {[], infinity},
                                                         native, true),
                         ok = leveled_cdb:cdb_put(CDB1, IK, IV)
@@ -1266,20 +1266,20 @@ compact_singlefile_totwosmallfiles_testto() ->
                     lists:seq(1, 1000)),
     {ok, NewName} = leveled_cdb:cdb_complete(CDB1),
     {ok, CDBr} = leveled_cdb:cdb_open_reader(NewName),
-    CDBoptsSmall = 
+    CDBoptsSmall =
         #cdb_options{binary_mode=true, max_size=400000, file_path=CP},
     BestRun1 = [#candidate{low_sqn=1,
                             filename=leveled_cdb:cdb_filename(CDBr),
                             journal=CDBr,
                             compaction_perc=50.0}],
     FakeFilterFun =
-        fun(_FS, _LK, SQN) -> 
+        fun(_FS, _LK, SQN) ->
             case SQN rem 2 of
                 0 -> current;
                 _ -> replaced
             end
         end,
-    
+
     ManifestSlice = compact_files(BestRun1,
                                     CDBoptsSmall,
                                     FakeFilterFun,
@@ -1297,7 +1297,7 @@ compact_singlefile_totwosmallfiles_testto() ->
     ok = leveled_cdb:cdb_destroy(CDBr).
 
 size_score_test() ->
-    KeySizeList = 
+    KeySizeList =
         [{{1, ?INKT_STND, {?STD_TAG, <<"B">>, <<"Key1">>, null}}, 104},
             {{2, ?INKT_STND, {?STD_TAG, <<"B">>, <<"Key2">>, null}}, 124},
             {{3, ?INKT_STND, {?STD_TAG, <<"B">>, <<"Key3">>, null}}, 144},
@@ -1310,9 +1310,9 @@ size_score_test() ->
             {{7, ?INKT_STND, {?STD_TAG, <<"B">>, <<"Key7">>, null}}, 184}],
     MaxSQN = 6,
     CurrentList =
-        [{?STD_TAG, <<"B">>, <<"Key1">>, null}, 
-            {?STD_TAG, <<"B">>, <<"Key4">>, null}, 
-            {?STD_TAG, <<"B">>, <<"Key5">>, <<"Subk1">>}, 
+        [{?STD_TAG, <<"B">>, <<"Key1">>, null},
+            {?STD_TAG, <<"B">>, <<"Key4">>, null},
+            {?STD_TAG, <<"B">>, <<"Key5">>, <<"Subk1">>},
             {?STD_TAG, <<"B">>, <<"Key6">>, null}],
     FilterFun =
         fun(L, K, _SQN) ->
@@ -1334,6 +1334,6 @@ size_score_test() ->
 coverage_cheat_test() ->
     {noreply, _State0} = handle_info(timeout, #state{}),
     {ok, _State1} = code_change(null, #state{}, null),
-    terminate(error, #state{}).    
+    terminate(error, #state{}).
 
 -endif.
