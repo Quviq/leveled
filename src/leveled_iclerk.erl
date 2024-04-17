@@ -834,7 +834,7 @@ split_positions_into_batches(Positions, Journal, Batches) ->
 filter_output(KVCs, FilterFun, FilterServer, MaxSQN, Strategy) ->
     FoldFun =
         filter_output_fun(FilterFun, FilterServer, MaxSQN, Strategy),
-    lists:reverse(lists:foldl(FoldFun, [], KVCs)).
+    lists:foldr(FoldFun, [], KVCs).
 
 
 filter_output_fun(FilterFun, FilterServer, MaxSQN, Strategy) ->
