@@ -4,13 +4,13 @@
 %% (a leveled codec type) are, used for building and checking - the filter
 %% splits a single hash into a 1 byte slot identifier, and 2 x 12 bit hashes
 %% (so k=2, although only a single hash is used).
-%% 
+%%
 %% The filter is designed to support a maximum of 64K keys, larger numbers of
 %% keys will see higher fprs - with a 40% fpr at 250K keys.
-%% 
+%%
 %% The filter uses the second "Extra Hash" part of the segment-hash to ensure
 %% no overlap of fpr with the leveled_sst find_pos function.
-%% 
+%%
 %% The completed bloom is a binary - to minimise the cost of copying between
 %% processes and holding in memory.
 
@@ -78,7 +78,7 @@ check_hash({_SegHash, Hash}, BloomBin) when is_binary(BloomBin)->
         _ ->
             false
     end.
-    
+
 %%%============================================================================
 %%% Internal Functions
 %%%============================================================================
@@ -116,33 +116,33 @@ match_hash(BloomBin, Pos, Hash) ->
 build_bloom(_SlotHashes, 0) ->
     <<>>;
 build_bloom(SlotHashes, SlotCount) when SlotCount > 0 ->
-    lists:foldr(
-        fun(I, AccBin) ->
+    binary:list_to_bin(
+    lists:map(
+        fun(I) ->
             HashList = element(I, SlotHashes),
             SlotBin =
                 add_hashlist(
-                    lists:usort(HashList), 0, 1, ?INTEGER_SLICES, <<>>),
-            <<SlotBin/binary, AccBin/binary>>
+                    lists:usort(HashList), 0, 1, ?INTEGER_SLICES, []),
+            <<SlotBin/binary>>
         end,
-        <<>>,
         lists:seq(1, SlotCount)
-    ).
+    )).
 
 -spec add_hashlist(
         list(bloom_hash()),
         non_neg_integer(),
         non_neg_integer(),
         0..?INTEGER_SLICES,
-        binary()) -> bloom().
+        list()) -> bloom().
 add_hashlist([], ThisSlice, SliceCount, SliceCount, AccBin) ->
-    <<ThisSlice:?INTEGER_SLICE_SIZE/integer, AccBin/binary>>;
+    binary:list_to_bin([<<ThisSlice:?INTEGER_SLICE_SIZE/integer>> | AccBin]);
 add_hashlist([], ThisSlice, SliceNumber, SliceCount, AccBin) ->
     add_hashlist(
         [],
         0,
         SliceNumber + 1,
         SliceCount,
-        <<ThisSlice:?INTEGER_SLICE_SIZE/integer, AccBin/binary>>);
+        [<<ThisSlice:?INTEGER_SLICE_SIZE/integer>> | AccBin]);
 add_hashlist([H0|Rest], ThisSlice, SliceNumber, SliceCount, AccBin)
         when ((H0 bsr ?MASK_BSR) + 1) == SliceNumber ->
     Mask0 = 1 bsl (H0 band (?MASK_BAND)),
@@ -154,7 +154,7 @@ add_hashlist(Rest, ThisSlice, SliceNumber, SliceCount, AccBin) ->
         0,
         SliceNumber + 1,
         SliceCount,
-        <<ThisSlice:?INTEGER_SLICE_SIZE/integer, AccBin/binary>>).
+        [ <<ThisSlice:?INTEGER_SLICE_SIZE/integer>> | AccBin]).
 
 %%%============================================================================
 %%% Test
@@ -196,7 +196,7 @@ check_all_hashes(BloomBin, HashList) ->
             ?assertMatch(true, check_hash(Hash, BloomBin))
         end,
     lists:foreach(CheckFun, HashList).
-        
+
 check_neg_hashes(BloomBin, HashList, Counters) ->
     CheckFun =
         fun(Hash, {AccT, AccF}) ->
@@ -230,18 +230,18 @@ bloom_test_ranges() ->
     test_bloom(1000, 4).
 
 test_bloom(N, Runs) ->
-    ListOfHashLists = 
+    ListOfHashLists =
         lists:map(fun(_X) -> get_hashlist(N * 2) end, lists:seq(1, Runs)),
     SpliListFun =
-        fun(HashList) -> 
-            HitOrMissFun = 
+        fun(HashList) ->
+            HitOrMissFun =
                 fun (Entry, {HitL, MissL}) ->
                     case leveled_rand:uniform() < 0.5 of
-                        true -> 
+                        true ->
                             {[Entry|HitL], MissL};
                         false ->
                             {HitL, [Entry|MissL]}
-                    end 
+                    end
                 end,
             lists:foldl(HitOrMissFun, {[], []}, HashList)
         end,
@@ -252,7 +252,7 @@ test_bloom(N, Runs) ->
         lists:map(
             fun({HL, _ML}) -> create_bloom(HL) end, SplitListOfHashLists),
     TSa = timer:now_diff(os:timestamp(), SWa)/Runs,
-    
+
     SWb = os:timestamp(),
     PosChecks =
         lists:foldl(
@@ -267,7 +267,7 @@ test_bloom(N, Runs) ->
     TSb = timer:now_diff(os:timestamp(), SWb),
 
     SWc = os:timestamp(),
-    {Pos, Neg} = 
+    {Pos, Neg} =
         lists:foldl(
             fun(Nth, Acc) ->
                 {_HL, ML} = lists:nth(Nth, SplitListOfHashLists),
