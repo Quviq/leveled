@@ -1,5 +1,5 @@
 %% -------- Inker Manifest ---------
-%% 
+%%
 
 
 -module(leveled_imanifest).
@@ -21,7 +21,7 @@
         printer/1,
         complete_filex/0,
         get_cdbpids/1
-        ]).         
+        ]).
 
 -define(MANIFEST_FILEX, "man").
 -define(PENDING_FILEX, "pnd").
@@ -78,7 +78,7 @@ add_entry(Manifest, Entry, ToEnd) ->
             from_list(Man1)
     end.
 
--spec append_lastkey(manifest(), pid(), leveled_codec:journal_key()) 
+-spec append_lastkey(manifest(), pid(), leveled_codec:journal_key())
                                                             -> manifest().
 %% @doc
 %% On discovery of the last key in the last journal entry, the manifest can
@@ -86,7 +86,7 @@ add_entry(Manifest, Entry, ToEnd) ->
 append_lastkey(Manifest, Pid, LastKey) ->
     [{SQNMarker, SQNL}|ManifestTail] = Manifest,
     [{E_SQN, E_FN, E_P, E_LK}|SQNL_Tail] = SQNL,
-    case {E_P, E_LK} of 
+    case {E_P, E_LK} of
         {Pid, empty} ->
             UpdEntry = {E_SQN, E_FN, E_P, LastKey},
             [{SQNMarker, [UpdEntry|SQNL_Tail]}|ManifestTail];
@@ -117,12 +117,12 @@ find_entry(SQN, [_TopEntry|Tail]) ->
 %% Find the entries in the manifest where all items are < than the persisted
 %% SQN in the ledger
 find_persistedentries(SQN, ManifestAsList) ->
-    DropFun = 
+    DropFun =
         fun({ME_SQN, _FN, _ME_P, _LK}) ->
             ME_SQN > SQN
         end,
     Entries = lists:dropwhile(DropFun, ManifestAsList),
-    case Entries of 
+    case Entries of
         [_Head|Tail] ->
             Tail;
         [] ->
@@ -136,16 +136,12 @@ head_entry(Manifest) ->
     [{_SQNMarker, SQNL}|_Tail] = Manifest,
     [HeadEntry|_SQNL_Tail] = SQNL,
     HeadEntry.
-    
+
 -spec to_list(manifest()) -> list().
 %% @doc
 %% Convert the manifest to a flat list
 to_list(Manifest) ->
-    FoldFun =
-        fun({_SQNMarker, SubL}, Acc) ->
-            Acc ++ SubL
-        end,
-    lists:foldl(FoldFun, [], Manifest).
+    lists:append([ SubL || {_, SubL} <- Manifest ]).
 
 -spec reader(integer(), string()) -> manifest().
 %% @doc
@@ -161,14 +157,14 @@ reader(SQN, RootPath) ->
                                                 integer_to_list(SQN)
                                                 ++ ".man")),
     from_list(lists:reverse(lists:sort(binary_to_term(MBin)))).
-    
+
 -spec writer(manifest(), integer(), string()) -> ok.
 %% @doc
 %% Given a manifest and a manifest SQN and a file path, save the manifest to
 %% disk
 writer(Manifest, ManSQN, RootPath) ->
     ManPath = leveled_inker:filepath(RootPath, manifest_dir),
-    ok = filelib:ensure_dir(ManPath), 
+    ok = filelib:ensure_dir(ManPath),
         % When writing during backups, may not have been generated
     NewFN = filename:join(ManPath,
                             integer_to_list(ManSQN) ++ "." ++ ?MANIFEST_FILEX),
@@ -183,7 +179,7 @@ writer(Manifest, ManSQN, RootPath) ->
     GC_SQN = ManSQN - ?MANIFESTS_TO_RETAIN,
     GC_Man = filename:join(ManPath,
                             integer_to_list(GC_SQN) ++ "." ++ ?MANIFEST_FILEX),
-    ok = 
+    ok =
         case filelib:is_file(GC_Man) of
             true ->
                 file:delete(GC_Man);
@@ -210,7 +206,7 @@ complete_filex() ->
 
 -spec from_list(list()) -> manifest().
 %% @doc
-%% Convert from a flat list into a manifest with lookup jumps.  
+%% Convert from a flat list into a manifest with lookup jumps.
 %% The opposite of to_list/1
 from_list(Manifest) ->
     % Manifest should already be sorted with the highest SQN at the head
@@ -246,8 +242,8 @@ find_subentry(SQN, [{ME_SQN, _FN, ME_P, _LK}|_Tail]) when SQN >= ME_SQN ->
     ME_P;
 find_subentry(SQN, [_TopEntry|Tail]) ->
     find_subentry(SQN, Tail).
-    
-    
+
+
 %%%============================================================================
 %%% Test
 %%%============================================================================
@@ -307,23 +303,23 @@ buildrandomfashion_test() ->
     RandMapFun =
         fun(X) ->
             {leveled_rand:uniform(), X}
-        end,    
+        end,
     ManL1 = lists:map(RandMapFun, ManL0),
     ManL2 = lists:sort(ManL1),
-    
+
     FoldFun =
         fun({_R, E}, Man) ->
             add_entry(Man, E, false)
         end,
     Man0 = lists:foldl(FoldFun, [], ManL2),
-    
+
     test_testmanifest(Man0),
     ?assertMatch(ManL0, to_list(Man0)),
-    
+
     RandomEntry = lists:nth(leveled_rand:uniform(50), ManL0),
     Man1 = remove_entry(Man0, RandomEntry),
     Man2 = add_entry(Man1, RandomEntry, false),
-    
+
     test_testmanifest(Man2),
     ?assertMatch(ManL0, to_list(Man2)).
 
