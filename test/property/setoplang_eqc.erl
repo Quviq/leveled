@@ -46,10 +46,7 @@ value() ->
 %% This context is always enumartion.
 %% Consider implementing a context in which keys are not consecutive
 context() ->
-  ?LET(Sets, list(value()), lists:enumerate(Sets)).
-%context() ->
-%  ?LET(Map, map(set_id(), value()),
-%       lists:sort(maps:to_list(Map))).
+  ?LET(Sets, list(value()), sublist(lists:enumerate(Sets))).
 
 ws() ->
   ?SHRINK(list(elements(" \t\f\v\r\n\s")), " ").
